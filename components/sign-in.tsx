@@ -30,6 +30,9 @@ export function SignIn() {
       : `/sign-in?redirect=${encodeURIComponent(safeRedirect)}`;
 
   const getErrorMessage = (value: string) => {
+    if (value.toLowerCase() === "email_not_found") {
+      return "GitHub did not provide an email address. The CMS has been updated to support private GitHub emails; wait for the latest deployment and try again.";
+    }
     if (value.toLowerCase() !== "unable_to_get_user_info") return value;
     return [
       "GitHub denied profile access. Re-authorize Pages CMS in GitHub Settings > Applications > Authorized GitHub Apps / Authorized OAuth Apps, then try again.",

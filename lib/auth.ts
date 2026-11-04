@@ -81,6 +81,14 @@ export const auth = betterAuth({
         if (!profile.email && emails) {
           profile.email = (emails.find((entry) => entry.primary) ?? emails[0])?.email as string;
         }
+
+        // Better Auth requires an email for social sign-in, but GitHub can omit it
+        // when the account keeps all addresses private or the email endpoint does
+        // not return a usable address. Use a stable, account-scoped noreply address
+        // so private GitHub accounts can still sign in without exposing an email.
+        if (!profile.email) {
+          profile.email = `${profile.id}+${profile.login}@users.noreply.github.com`;
+        }
         const emailVerified = emails?.find((entry) => entry.email === profile.email)?.verified ?? false;
 
         const userMap = {
