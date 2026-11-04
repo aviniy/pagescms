@@ -14,6 +14,7 @@ import TableCell from "@tiptap/extension-table-cell";
 import { Markdown } from "@tiptap/markdown";
 import { DOMSerializer, type Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
+import { EnhancedCodeBlock } from "./code-block";
 import {
   Bold,
   Columns3,
@@ -153,6 +154,7 @@ type BlockType =
 
 type ActiveState = {
   blockType: BlockType;
+  codeLanguage: string;
   bold: boolean;
   italic: boolean;
   underline: boolean;
@@ -163,6 +165,7 @@ type ActiveState = {
 
 const defaultActiveState: ActiveState = {
   blockType: "paragraph",
+  codeLanguage: "",
   bold: false,
   italic: false,
   underline: false,
@@ -243,6 +246,26 @@ const blockOptions: Array<{ value: BlockType; label: string }> = [
   { value: "codeBlock", label: "Code block" },
 ];
 
+const codeLanguageOptions = [
+  ["", "Plain text"],
+  ["bash", "Bash"],
+  ["c", "C"],
+  ["cpp", "C++"],
+  ["css", "CSS"],
+  ["diff", "Diff"],
+  ["html", "HTML"],
+  ["java", "Java"],
+  ["javascript", "JavaScript"],
+  ["json", "JSON"],
+  ["markdown", "Markdown"],
+  ["php", "PHP"],
+  ["python", "Python"],
+  ["rust", "Rust"],
+  ["sql", "SQL"],
+  ["typescript", "TypeScript"],
+  ["yaml", "YAML"],
+] as const;
+
 export function Editor({
   value = "",
   onChange = () => undefined,
@@ -282,7 +305,9 @@ export function Editor({
       StarterKit.configure({
         link: false,
         underline: false,
+        codeBlock: false,
       }),
+      EnhancedCodeBlock,
       Underline,
       Link.configure({
         openOnClick: false,
@@ -425,6 +450,9 @@ export function Editor({
 
       return {
         blockType,
+        codeLanguage: currentEditor.isActive("codeBlock")
+          ? String(currentEditor.getAttributes("codeBlock")["language"] ?? "")
+          : "",
         bold: currentEditor.isActive("bold"),
         italic: currentEditor.isActive("italic"),
         underline: currentEditor.isActive("underline"),
@@ -765,6 +793,11 @@ export function Editor({
     }
   };
 
+  const setCodeLanguage = (language: string): void => {
+    if (!editor.isActive("codeBlock")) return;
+    editor.chain().focus().updateAttributes("codeBlock", { language: language || null }).run();
+  };
+
   const inlineActions: MenuAction[] = [
     {
       label: "Bold",
@@ -935,7 +968,13 @@ export function Editor({
         shouldShow={({ editor: bubbleEditor, from, to, view, element }) => {
           const hasEditorFocus = view.hasFocus() || element.contains(document.activeElement);
           if (!hasEditorFocus) return false;
-          return showLinkInput || showTableActions || showAltInput || (!bubbleEditor.state.selection.empty && from !== to);
+          return (
+            showLinkInput ||
+            showTableActions ||
+            showAltInput ||
+            bubbleEditor.isActive("codeBlock") ||
+            (!bubbleEditor.state.selection.empty && from !== to)
+          );
         }}
       >
         <div className="flex flex-col gap-1">
@@ -953,6 +992,29 @@ export function Editor({
                   {blockOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDownIcon
+                  className="text-muted-foreground pointer-events-none absolute top-1/2 right-1.5 size-3.5 -translate-y-1/2 opacity-50"
+                  aria-hidden="true"
+                />
+              </div>
+            ) : null}
+            {activeState.blockType === "codeBlock" ? (
+              <div className="group/native-select relative w-fit">
+                <select
+                  id="code-language"
+                  value={activeState.codeLanguage}
+                  onChange={(event) => setCodeLanguage(event.target.value)}
+                  disabled={disabled}
+                  aria-label="Code language"
+                  title="Syntax highlighting language"
+                  className="h-7 w-full appearance-none rounded-md border border-transparent bg-transparent px-2 pr-5.5 text-sm shadow-none outline-none hover:bg-accent focus-visible:outline-none focus-visible:ring-0 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {codeLanguageOptions.map(([value, label]) => (
+                    <option key={value || "plain"} value={value}>
+                      {label}
                     </option>
                   ))}
                 </select>

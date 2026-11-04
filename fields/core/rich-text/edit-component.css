@@ -65,6 +65,44 @@
    @apply bg-transparent p-0;
  }
 
+ .cn-editor .tiptap pre code .hljs-comment,
+ .cn-editor .tiptap pre code .hljs-quote {
+   @apply text-muted-foreground italic;
+ }
+
+ .cn-editor .tiptap pre code .hljs-keyword,
+ .cn-editor .tiptap pre code .hljs-selector-tag,
+ .cn-editor .tiptap pre code .hljs-literal,
+ .cn-editor .tiptap pre code .hljs-section,
+ .cn-editor .tiptap pre code .hljs-link {
+   color: #c084fc;
+ }
+
+ .cn-editor .tiptap pre code .hljs-string,
+ .cn-editor .tiptap pre code .hljs-title,
+ .cn-editor .tiptap pre code .hljs-name,
+ .cn-editor .tiptap pre code .hljs-type,
+ .cn-editor .tiptap pre code .hljs-attribute,
+ .cn-editor .tiptap pre code .hljs-symbol,
+ .cn-editor .tiptap pre code .hljs-bullet,
+ .cn-editor .tiptap pre code .hljs-addition {
+   color: #34d399;
+ }
+
+ .cn-editor .tiptap pre code .hljs-number,
+ .cn-editor .tiptap pre code .hljs-meta,
+ .cn-editor .tiptap pre code .hljs-built_in,
+ .cn-editor .tiptap pre code .hljs-builtin-name,
+ .cn-editor .tiptap pre code .hljs-params {
+   color: #60a5fa;
+ }
+
+ .cn-editor .tiptap pre code .hljs-deletion,
+ .cn-editor .tiptap pre code .hljs-variable,
+ .cn-editor .tiptap pre code .hljs-template-variable {
+   color: #fb7185;
+ }
+
  .cn-editor .tiptap table {
    @apply my-4 w-full border-collapse;
  }
