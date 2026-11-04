@@ -35,6 +35,8 @@
     "@dnd-kit/sortable": "^8.0.0",
     "@hookform/resolvers": "^3.10.0",
     "@ltd/j-toml": "^1.38.0",
+    "@neon/config": "^1.10.1",
+    "@neon/env": "^1.6.9",
     "@next/env": "^16.1.6",
     "@octokit/app": "^16.1.2",
     "@octokit/rest": "^22.0.1",

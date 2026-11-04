@@ -8,6 +8,8 @@ export default defineConfig({
   strict: true,
   verbose: true,
   dbCredentials: {
-    url: process.env.DATABASE_URL!,
+    // Migrations need a direct connection. Runtime traffic keeps using the
+    // pooled DATABASE_URL that Neon writes for serverless deployments.
+    url: process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL!,
   },
 });
