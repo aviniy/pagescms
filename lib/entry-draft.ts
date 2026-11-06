@@ -29,3 +29,22 @@ export function parseEntryDraftHistory(raw: string | null): EntryDraft[] {
       .filter((draft): draft is EntryDraft => draft !== null).slice(0, DRAFT_HISTORY_LIMIT);
   } catch { return []; }
 }
+
+export function moveEntryDraft(storage: Pick<Storage, "getItem" | "setItem" | "removeItem">, from: string, to: string, baseSha?: string) {
+  if (from === to) return;
+  const draft = parseEntryDraft(storage.getItem(from));
+  const target = parseEntryDraft(storage.getItem(to));
+  const candidates = [target, ...parseEntryDraftHistory(storage.getItem(`${from}:history`)), ...parseEntryDraftHistory(storage.getItem(`${to}:history`))];
+  const seen = new Set<string>();
+  const history = candidates.filter((item): item is EntryDraft => {
+    if (!item) return false;
+    const key = JSON.stringify(item.values);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, DRAFT_HISTORY_LIMIT);
+  if (draft) storage.setItem(to, JSON.stringify({ ...draft, baseSha: baseSha ?? draft.baseSha }));
+  if (history.length) storage.setItem(`${to}:history`, JSON.stringify(history));
+  storage.removeItem(from);
+  storage.removeItem(`${from}:history`);
+}

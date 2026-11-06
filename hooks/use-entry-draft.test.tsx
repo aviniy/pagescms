@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { JSDOM } from "jsdom";
-import { act, useEffect } from "react";
+import { act, useEffect, useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import { useForm, type UseFormReturn, type FieldValues } from "react-hook-form";
 import { useEntryDraft } from "./use-entry-draft";
-import { entryDraftKey, parseEntryDraft } from "../lib/entry-draft";
+import { entryDraftKey, moveEntryDraft, parseEntryDraft } from "../lib/entry-draft";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://cms.example" });
 Object.defineProperties(globalThis, {
@@ -18,18 +18,20 @@ Object.defineProperties(globalThis, {
 const key = entryDraftKey("user", "owner", "repo", "main", "post.md");
 let form: UseFormReturn<FieldValues>;
 let draft: ReturnType<typeof useEntryDraft>;
-function Harness() {
-  const currentForm = useForm<FieldValues>({ defaultValues: { body: "server", title: "title" } });
-  const currentDraft = useEntryDraft(currentForm, key, "sha");
+function Harness({ draftKey = key, sha = "sha", serverBody = "server" }: { draftKey?: string; sha?: string; serverBody?: string }) {
+  const defaults = useMemo(() => ({ body: serverBody, title: "title" }), [serverBody]);
+  const currentForm = useForm<FieldValues>({ defaultValues: defaults });
+  void currentForm.formState.isDirty;
+  const currentDraft = useEntryDraft(currentForm, draftKey, sha, defaults);
   useEffect(() => {
     form = currentForm;
     draft = currentDraft;
   }, [currentForm, currentDraft]);
   return null;
 }
-async function mount() {
+async function mount(props: { draftKey?: string; sha?: string; serverBody?: string } = {}) {
   const root = createRoot(document.createElement("div"));
-  await act(async () => root.render(<Harness />));
+  await act(async () => root.render(<Harness {...props} />));
   return root;
 }
 
@@ -114,4 +116,55 @@ test("storage failure is visible while the editable values remain available for 
     proto.setItem = original;
     await act(async () => root.unmount());
   }
+});
+
+test("five edit/save cycles advance the dirty baseline without resurrecting an earlier draft", async () => {
+  window.localStorage.clear();
+  const root = await mount();
+  for (let i = 1; i <= 5; i++) {
+    await act(async () => form.setValue("body", `revision ${i}`, { shouldDirty: true }));
+    assert.equal(form.formState.isDirty, true);
+    const snapshot = structuredClone(form.getValues());
+    await act(async () => draft.saved(snapshot, `sha-${i}`));
+    assert.equal(form.getValues("body"), `revision ${i}`);
+    assert.equal(form.formState.isDirty, false);
+    assert.equal(window.localStorage.getItem(key), null);
+  }
+  await act(async () => root.unmount());
+});
+
+test("returning to the original text during a save still requires saving against the new baseline", async () => {
+  window.localStorage.clear();
+  const root = await mount();
+  await act(async () => form.setValue("body", "submitted change", { shouldDirty: true }));
+  const submitted = structuredClone(form.getValues());
+  await act(async () => form.setValue("body", "server", { shouldDirty: true }));
+  assert.equal(form.formState.isDirty, false);
+  await act(async () => draft.saved(submitted, "new-sha"));
+  assert.equal(form.getValues("body"), "server");
+  assert.equal(form.formState.isDirty, true);
+  assert.equal(parseEntryDraft(window.localStorage.getItem(key))?.baseSha, "new-sha");
+  await act(async () => root.unmount());
+});
+
+test("creating a file moves the newer unsaved draft to its permanent path and survives reload", async () => {
+  window.localStorage.clear();
+  const creatingKey = entryDraftKey("user", "owner", "repo", "main", "new:posts:");
+  let root = await mount({ draftKey: creatingKey });
+  await act(async () => form.setValue("body", "created version", { shouldDirty: true }));
+  const submitted = structuredClone(form.getValues());
+  await act(async () => form.setValue("body", "typed during create", { shouldDirty: true }));
+  moveEntryDraft(window.localStorage, creatingKey, key, "created-sha");
+  await act(async () => draft.saved(submitted, "created-sha"));
+  await act(async () => root.render(<Harness draftKey={key} sha="created-sha" serverBody="created version" />));
+  assert.equal(form.getValues("body"), "typed during create");
+  assert.equal(parseEntryDraft(window.localStorage.getItem(key))?.values.body, "typed during create");
+  assert.equal(window.localStorage.getItem(creatingKey), null);
+  await act(async () => root.unmount());
+  root = await mount({ draftKey: key, sha: "created-sha", serverBody: "created version" });
+  assert.equal(draft.recovery?.values.body, "typed during create");
+  assert.equal(draft.recovery?.baseSha, "created-sha");
+  await act(async () => draft.restore());
+  assert.equal(form.getValues("body"), "typed during create");
+  await act(async () => root.unmount());
 });

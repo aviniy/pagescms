@@ -23,6 +23,23 @@ const userTable = pgTable("user", {
   updatedAt: timestamp("updated_at").notNull().defaultNow()
 });
 
+export const entryDraftTable = pgTable("entry_draft", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => userTable.id, { onDelete: "cascade" }),
+  scope: text("scope").notNull(),
+  identity: text("identity").notNull(),
+  path: text("path"),
+  baseSha: text("base_sha"),
+  values: jsonb("values").$type<Record<string, unknown>>().notNull(),
+  version: integer("version").notNull().default(1),
+  requestId: text("request_id").notNull(),
+  history: jsonb("history").$type<Array<{ values: Record<string, unknown>; savedAt: number }>>().notNull().default([]),
+  savedAt: timestamp("saved_at").notNull().defaultNow(),
+}, (table) => ({
+  identityIndex: uniqueIndex("entry_draft_identity").on(table.userId, table.scope, table.identity),
+  pathIndex: index("entry_draft_path").on(table.userId, table.scope, table.path),
+}));
+
 const sessionTable = pgTable("session", {
   id: text("id").notNull().primaryKey(),
   expiresAt: timestamp("expires_at").notNull(),

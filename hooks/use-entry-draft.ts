@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UseFormReturn, FieldValues } from "react-hook-form";
-import { DRAFT_HISTORY_LIMIT, parseEntryDraft, parseEntryDraftHistory, type EntryDraft } from "@/lib/entry-draft";
+import { DRAFT_HISTORY_LIMIT, moveEntryDraft, parseEntryDraft, parseEntryDraftHistory, type EntryDraft } from "@/lib/entry-draft";
 
-export function useEntryDraft(form: UseFormReturn<FieldValues>, storageKey?: string, baseSha?: string, defaultValues?: FieldValues) {
+export function useEntryDraft(form: UseFormReturn<FieldValues>, storageKey?: string, baseSha?: string, defaultValues?: FieldValues, retainCurrent = false) {
   const [recovery, setRecovery] = useState<EntryDraft | null>(null);
   const [storageFailed, setStorageFailed] = useState(false);
   const storageFailedRef = useRef(false);
@@ -15,6 +15,8 @@ export function useEntryDraft(form: UseFormReturn<FieldValues>, storageKey?: str
   const pendingRef = useRef(false);
   const baselineRef = useRef("");
   const latestBaseSha = useRef(baseSha);
+  const activeKeyRef = useRef<string | undefined>(undefined);
+  const initializedRef = useRef(false);
   latestBaseSha.current = baseSha;
 
   const checkpoint = useCallback((previous: EntryDraft) => {
@@ -31,7 +33,7 @@ export function useEntryDraft(form: UseFormReturn<FieldValues>, storageKey?: str
     if (!storageKey || pendingRef.current) return;
     const values = form.getValues();
     try {
-      if (JSON.stringify(values) === baselineRef.current) {
+      if (!retainCurrent && JSON.stringify(values) === baselineRef.current) {
         if (previousRef.current && JSON.stringify(previousRef.current.values) !== JSON.stringify(values)) checkpoint(previousRef.current);
         previousRef.current = null;
         window.localStorage.removeItem(storageKey);
@@ -59,21 +61,31 @@ export function useEntryDraft(form: UseFormReturn<FieldValues>, storageKey?: str
       storageFailedRef.current = true;
       setStorageFailed(true);
     }
-  }, [checkpoint, form, storageKey]);
+  }, [checkpoint, form, storageKey, retainCurrent]);
 
   useEffect(() => {
-    baselineRef.current = JSON.stringify(form.getValues());
+    const moving = initializedRef.current && activeKeyRef.current !== storageKey;
+    if (!initializedRef.current) baselineRef.current = JSON.stringify(form.getValues());
+    const previousKey = activeKeyRef.current;
+    initializedRef.current = true;
+    activeKeyRef.current = storageKey;
     if (!storageKey) return;
     try {
+      if (moving && previousKey) {
+        moveEntryDraft(window.localStorage, previousKey, storageKey, latestBaseSha.current);
+        pendingRef.current = false;
+        setRecovery(null);
+      }
       const draft = parseEntryDraft(window.localStorage.getItem(storageKey));
       previousRef.current = draft;
       historyRef.current = parseEntryDraftHistory(window.localStorage.getItem(`${storageKey}:history`));
       setHistory(historyRef.current);
-      if (draft && JSON.stringify(draft.values) !== baselineRef.current) {
+      if (!moving && draft && JSON.stringify(draft.values) !== baselineRef.current) {
         pendingRef.current = true;
         setRecovery(draft);
         setLastSavedAt(draft.savedAt);
       }
+      if (moving) persist();
     } catch { setStorageFailed(true); }
 
     // Rich-text updates are already canonical form values. Persist synchronously
@@ -120,10 +132,17 @@ export function useEntryDraft(form: UseFormReturn<FieldValues>, storageKey?: str
     setRecovery(null);
   };
 
-  const saved = (values: Record<string, unknown>) => {
+  const saved = (values: Record<string, unknown>, savedSha?: string) => {
+    if (savedSha) latestBaseSha.current = savedSha;
     checkpoint({ version: 1, baseSha: latestBaseSha.current, savedAt: Date.now(), values });
     baselineRef.current = JSON.stringify(values);
-    if (JSON.stringify(form.getValues()) !== baselineRef.current) {
+    const current = form.getValues();
+    if (JSON.stringify(current) !== baselineRef.current) {
+      // Advance the dirty baseline to the confirmed save without replacing text
+      // typed during the request, including a return to the original text.
+      form.reset(values, { keepValues: true, keepDirty: true, keepTouched: true, keepErrors: true });
+      const changedName = Object.keys(current).find((key) => JSON.stringify(current[key]) !== JSON.stringify(values[key]));
+      if (changedName) form.setValue(changedName, current[changedName], { shouldDirty: true, shouldValidate: false });
       persist(); // Changes typed while the request was running must survive.
       return;
     }

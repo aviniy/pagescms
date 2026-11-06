@@ -7,7 +7,8 @@ import Link from "next/link";
 import { useConfig } from "@/contexts/config-context";
 import { usePublication } from "@/contexts/publication-context";
 import { useUser } from "@/contexts/user-context";
-import { entryDraftKey } from "@/lib/entry-draft";
+import { entryDraftKey, moveEntryDraft } from "@/lib/entry-draft";
+import { createEntrySaveQueue, type EntrySaveBase, type EntrySaveResult } from "@/lib/entry-save-queue";
 import { parseAndValidateConfig } from "@/lib/config";
 import { resolveContentOperations } from "@/lib/operations";
 import { requireApiSuccess } from "@/lib/api-client";
@@ -82,6 +83,16 @@ type GroupTrailItem = {
   label?: string | null;
 };
 
+type LoadedEntry = EntryData & { readEpoch: number; readDuringSave: boolean };
+type EntrySaveRequest = {
+  values: Record<string, unknown>;
+  editVersion: number;
+  filename: string;
+  showFilenameField: boolean;
+  filenameFieldMode: string;
+  filenameUnlocked: boolean;
+};
+
 export function Entry({
   name = "",
   path: initialPath,
@@ -98,6 +109,7 @@ export function Entry({
   onSave?: (data: Record<string, unknown>) => void;
 }) {
   const [path, setPath] = useState<string | undefined>(initialPath);
+  const [draftIdentity] = useState(() => initialPath ?? (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("draft") : null) ?? crypto.randomUUID());
   const [entry, setEntry] = useState<EntryData | null>();
   const [sha, setSha] = useState<string | undefined>();
   const [displayTitle, setDisplayTitle] = useState<string>(() => {
@@ -109,6 +121,8 @@ export function Entry({
   });
   const [isLoading, setIsLoading] = useState(path ? true : false);
   const [isSaving, setIsSaving] = useState(false);
+  const [hasChangesSinceSubmit, setHasChangesSinceSubmit] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [isFormDirty, setIsFormDirty] = useState(false);
   const [hasRegisteredChanges, setHasRegisteredChanges] = useState(false);
   const [error, setError] = useState<string | undefined | null>(null);
@@ -119,6 +133,16 @@ export function Entry({
   const { mutate } = useSWRConfig();
   const { trackPublication } = usePublication();
   const { user } = useUser();
+  const saveHandlersRef = useRef<{
+    persist: (request: EntrySaveRequest, base: EntrySaveBase) => Promise<EntrySaveResult>;
+    onSaved: (request: EntrySaveRequest, result: EntrySaveResult) => void;
+  }>({ persist: async () => { throw new Error("편집기를 준비 중이에요."); }, onSaved() {} });
+  const [saveQueue] = useState(() => createEntrySaveQueue<EntrySaveRequest>({
+    persist: (request, base) => saveHandlersRef.current.persist(request, base),
+    onSaved: (request, result) => saveHandlersRef.current.onSaved(request, result),
+    onBusyChange: setIsSaving,
+    fingerprint: (request) => JSON.stringify([request.values, request.filename, request.showFilenameField, request.filenameFieldMode, request.filenameUnlocked]),
+  }));
 
   const router = useRouter();
   
@@ -218,23 +242,25 @@ export function Entry({
       : null
   ), [config.branch, config.owner, config.repo, name, path]);
 
-  const fetchEntryByUrl = useCallback(async (apiUrl: string): Promise<EntryData> => {
-    const response = await fetch(apiUrl);
+  const fetchEntryByUrl = useCallback(async (apiUrl: string): Promise<LoadedEntry> => {
+    const readEpoch = saveQueue.epoch;
+    const readDuringSave = saveQueue.busy;
+    const response = await fetch(apiUrl, { cache: "no-store" });
     const data = await requireApiSuccess<any>(
       response,
       "Failed to fetch entry",
     );
-    return data.data as EntryData;
-  }, []);
+    return { ...data.data, readEpoch, readDuringSave } as LoadedEntry;
+  }, [saveQueue]);
 
   const {
     data: swrEntryData,
     error: swrEntryError,
     isLoading: swrEntryLoading,
     mutate: mutateEntry,
-  } = useSWR<EntryData>(
-    entryApiUrl,
-    fetchEntryByUrl,
+  } = useSWR<LoadedEntry>(
+    entryApiUrl ? [entryApiUrl, saveQueue.id] as const : null,
+    ([url]) => fetchEntryByUrl(url),
     {
       revalidateOnFocus: true,
       revalidateOnReconnect: true,
@@ -250,6 +276,7 @@ export function Entry({
   useEffect(() => {
     if (!swrEntryData || !path) return;
     if (unsavedRef.current) return;
+    if (swrEntryData.path !== path || !saveQueue.adoptRemote(swrEntryData, swrEntryData.readEpoch, swrEntryData.readDuringSave)) return;
     setEntry(swrEntryData);
     setSha(swrEntryData.sha);
     setHasRegisteredChanges(false);
@@ -271,7 +298,7 @@ export function Entry({
     } else if (!title && path && path !== ".pages.yml") {
       setDisplayTitle(`Editing "${getFileName(normalizePath(path))}"`);
     }
-  }, [initialPath, path, schema, swrEntryData, title]);
+  }, [initialPath, path, saveQueue, schema, swrEntryData, title]);
 
   useEffect(() => {
     if (!swrEntryError) return;
@@ -318,130 +345,118 @@ export function Entry({
     && filenameValue.trim().length > 0
     && filenameValue.trim() !== currentFilename;
 
-  const onSubmit = async (contentObject: Record<string, unknown>) => {
-    setIsSaving(true);
-    const submitStartChangeVersion = changeVersionRef.current;
+  const editUrlFor = (savedPath: string) => `/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/collection/${encodeURIComponent(name)}/edit/${encodeURIComponent(savedPath)}${!initialPath ? `?draft=${encodeURIComponent(draftIdentity)}` : ""}`;
 
-    const savePromise = new Promise<ApiSuccess<EntryData>>(async (resolve, reject) => {
-      try {
-        let savePath = path;
-        const trimmedFilename = filenameValue.trim();
-        const normalizedFilename = normalizePath(trimmedFilename).split("/").pop() || "";
+  useEffect(() => {
+    if (!initialPath && name) {
+      const url = new URL(window.location.href);
+      if (!url.searchParams.has("draft")) { url.searchParams.set("draft", draftIdentity); window.history.replaceState(null, "", url); }
+    }
+  }, [draftIdentity, initialPath, name]);
 
-        if (showFilenameField && !normalizedFilename) {
-          throw new Error("Filename is required.");
-        }
+  const persistEntry = async (request: EntrySaveRequest, base: EntrySaveBase): Promise<EntrySaveResult> => {
+    const { values, showFilenameField: showFilename, filenameFieldMode: filenameMode, filenameUnlocked } = request;
+    let savePath = base.path;
+    const normalizedFilename = normalizePath(request.filename.trim()).split("/").pop() || "";
+    if (showFilename && !normalizedFilename) throw new Error("Filename is required.");
 
-        if (!savePath) {
-          if (!schema) throw new Error("Cannot create entry without schema.");
-          if (!canCreate) throw new Error("Creating entries in this content item isn't allowed.");
-          const basePath = parent ?? schema.path;
-          if (basePath == null) throw new Error("Cannot create entry without a target path.");
-          const generatedFilename = showFilenameField
-            ? normalizedFilename
-            : generateFilename(schema.filename, schema, contentObject);
-          savePath = joinPathSegments([basePath, generatedFilename]);
-        } else if (filenameChanged && !canRename && schemaType === "collection") {
-          throw new Error("Renaming this entry isn't allowed.");
-        } else if (
-          showFilenameField
-          && filenameFieldMode === "enabled"
-          && isFilenameUnlocked
-          && filenameChanged
-          && schemaType === "collection"
-        ) {
-          const newPath = joinPathSegments([getParentPath(savePath), normalizedFilename]);
-          const renameResponse = await fetch(
-            `/api/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/files/${encodeURIComponent(savePath)}/rename`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                type: "content",
-                name,
-                newPath,
-              }),
-            },
-          );
-          await requireApiSuccess<any>(renameResponse, "Failed to rename file");
-          savePath = newPath;
-          setPath(newPath);
-          setIsFilenameUnlocked(false);
-          router.replace(`/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/collection/${encodeURIComponent(name)}/edit/${encodeURIComponent(newPath)}`);
-
-          const collectionKeyPrefix = `/api/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/collections/${encodeURIComponent(name)}?`;
-          void mutate((key) => typeof key === "string" && key.startsWith(collectionKeyPrefix));
-        }
-
-        const response = await fetch(`/api/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/files/${encodeURIComponent(savePath)}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type: path === ".pages.yml" ? "settings" : "content",
-            name,
-            content: schema?.list === true
-              ? contentObject.listWrapper
-              : contentObject,
-            sha: sha
-          }),
+    if (!savePath) {
+      if (!schema) throw new Error("Cannot create entry without schema.");
+      if (!canCreate) throw new Error("Creating entries in this content item isn't allowed.");
+      const basePath = parent ?? schema.path;
+      if (basePath == null) throw new Error("Cannot create entry without a target path.");
+      savePath = joinPathSegments([basePath, showFilename ? normalizedFilename : generateFilename(schema.filename, schema, values)]);
+    } else if (showFilename && filenameMode === "enabled" && normalizedFilename !== getFileName(savePath)) {
+      if (!canRename && schemaType === "collection") throw new Error("Renaming this entry isn't allowed.");
+      if (filenameUnlocked && schemaType === "collection") {
+        const newPath = joinPathSegments([getParentPath(savePath), normalizedFilename]);
+        const response = await fetch(`/api/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/files/${encodeURIComponent(savePath)}/rename`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "content", name, newPath }),
         });
-        const data = await requireApiSuccess<any>(
-          response,
-          "Failed to save file",
-        );
-        
-        if (data.data.sha !== sha) setSha(data.data.sha);
-        if (data.data.commitSha && path !== ".pages.yml") {
-          trackPublication({
-            owner: config.owner,
-            repo: config.repo,
-            branch: config.branch,
-            commitSha: data.data.commitSha,
-            path: data.data.path ?? savePath,
-          });
-        }
-        if (submitStartChangeVersion === changeVersionRef.current) {
-          setHasRegisteredChanges(false);
-        }
-
-        if (!path && schemaType === "collection") router.push(`/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/collection/${encodeURIComponent(name)}/edit/${encodeURIComponent(data.data.path)}`);
-        if (schemaType === "collection") {
-          const collectionKeyPrefix = `/api/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/collections/${encodeURIComponent(name)}?`;
-          void mutate((key) => typeof key === "string" && key.startsWith(collectionKeyPrefix));
-        }
-
-        resolve(data);
-      } catch (error) {
-        reject(error);
+        await requireApiSuccess(response, "Failed to rename file");
+        savePath = newPath;
+        saveQueue.rename(newPath);
+        setPath(newPath);
+        window.history.replaceState(null, "", editUrlFor(newPath));
       }
-    });
+    }
 
-    toast.promise(savePromise, {
-      loading: "Saving your file",
-      success: (response: ApiSuccess<EntryData>) => {
-        if (onSave) onSave(response.data);
-        return response.message;
-      },
-      error: (error: unknown) => error instanceof Error ? error.message : "Failed to save file.",
+    const response = await fetch(`/api/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/files/${encodeURIComponent(savePath)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: savePath === ".pages.yml" ? "settings" : "content", name,
+        content: schema?.list === true ? values.listWrapper : values,
+        sha: base.sha,
+      }),
     });
+    const result = await requireApiSuccess<ApiSuccess<EntryData>>(response, "Failed to save file");
+    return { ...result.data, message: result.message };
+  };
 
+  const applySavedEntry = (request: EntrySaveRequest, result: EntrySaveResult) => {
+    const confirmed: EntryData = {
+      ...result,
+      contentObject: schema?.list === true ? request.values.listWrapper as Record<string, unknown> : request.values,
+    };
+    // Publish the same confirmed version to the editor and SWR, synchronously
+    // with the queue's SHA update. Late pre-save reads cannot roll it back.
+    setEntry(confirmed);
+    setPath(result.path);
+    setSha(result.sha);
+    setError(null);
+    setNeedsSignIn(false);
+    setLastSavedAt(Date.now());
+    if (user && result.path !== path) {
+      try {
+        moveEntryDraft(window.localStorage,
+          entryDraftKey(user.id, config.owner, config.repo, config.branch, path ?? `new:${name}:${parent ?? ""}`),
+          entryDraftKey(user.id, config.owner, config.repo, config.branch, result.path), result.sha);
+      } catch { /* The draft hook reports storage failures and keeps the editor open. */ }
+    }
+    if (request.editVersion === changeVersionRef.current) {
+      setHasRegisteredChanges(false);
+      setHasChangesSinceSubmit(false);
+    }
+    const confirmedUrl = `/api/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/entries/${encodeURIComponent(result.path)}?name=${encodeURIComponent(name)}`;
+    void mutate([confirmedUrl, saveQueue.id], { ...confirmed, readEpoch: saveQueue.epoch, readDuringSave: false }, { revalidate: false });
+    if (!initialPath && schemaType === "collection") {
+      // Keep the mounted form and edits made during the create request. A router
+      // navigation would remount it before those edits can be saved.
+      window.history.replaceState(null, "", editUrlFor(result.path));
+    }
+    if (result.commitSha && result.path !== ".pages.yml") {
+      trackPublication({ owner: config.owner, repo: config.repo, branch: config.branch, commitSha: result.commitSha, path: result.path });
+    }
+    if (schemaType === "collection") {
+      const prefix = `/api/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/collections/${encodeURIComponent(name)}?`;
+      void mutate((key) => typeof key === "string" && key.startsWith(prefix));
+    }
+    onSave?.(confirmed);
+  };
+
+  useEffect(() => {
+    saveHandlersRef.current = { persist: persistEntry, onSaved: applySavedEntry };
+  });
+
+  const onSubmit = async (contentObject: Record<string, unknown>) => {
+    setHasChangesSinceSubmit(false);
+    const saving = saveQueue.enqueue({
+      values: contentObject, editVersion: changeVersionRef.current, filename: filenameValue,
+      showFilenameField, filenameFieldMode, filenameUnlocked: isFilenameUnlocked,
+    });
+    toast.promise(saving, {
+      loading: "게시 내용 저장 중",
+      success: "게시 내용 저장 완료 · 배포 상태를 확인하고 있어요.",
+      error: (error: unknown) => error instanceof Error ? error.message : "저장하지 못했어요. 임시 초안을 유지했어요.",
+    });
     try {
-      await savePromise;
-      setNeedsSignIn(false);
-      if (submitStartChangeVersion === changeVersionRef.current) {
-        setHasRegisteredChanges(false);
-      }
-      return true;
+      const result = await saving;
+      return { saved: true as const, sha: result.sha, path: result.path };
     } catch (error: unknown) {
       if ((error as { status?: number })?.status === 401) setNeedsSignIn(true);
-      if (error instanceof Error) {
-        console.error(error.message);
-      } else {
-        console.error(error);
-      }
+      setHasChangesSinceSubmit(true);
       return false;
-    } finally {
-      setIsSaving(false);
     }
   };
 
@@ -454,7 +469,7 @@ export function Entry({
       if (event.altKey) return;
 
       event.preventDefault();
-      if (isBusy) return;
+      if (isLoading) return;
 
       const form = document.getElementById("entry-form");
       if (form instanceof HTMLFormElement) {
@@ -464,7 +479,7 @@ export function Entry({
 
     window.addEventListener("keydown", handleSaveShortcut);
     return () => window.removeEventListener("keydown", handleSaveShortcut);
-  }, [isBusy]);
+  }, [isLoading]);
 
   const handleDelete = useCallback((path: string) => {
     // TODO: disable save button or freeze form while deleting?
@@ -491,8 +506,9 @@ export function Entry({
       void mutate(entryApiUrl, undefined, { revalidate: false });
     }
     setPath(newPath);
-    router.replace(`/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/collection/${encodeURIComponent(name)}/edit/${encodeURIComponent(newPath)}`);
-  }, [config.branch, config.owner, config.repo, entryApiUrl, mutate, name, router, schemaType]);
+    saveQueue.rename(newPath);
+    window.history.replaceState(null, "", `/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/collection/${encodeURIComponent(name)}/edit/${encodeURIComponent(newPath)}`);
+  }, [config.branch, config.owner, config.repo, entryApiUrl, mutate, name, saveQueue, schemaType]);
 
   const breadcrumbNode = useMemo(() => {
     if (!schema) {
@@ -688,6 +704,9 @@ export function Entry({
       </div>
       {showHeaderActions && (
         <div className="flex shrink-0 items-center gap-x-2">
+          <span role="status" className="hidden text-xs text-muted-foreground md:inline">
+            {isSaving ? "게시 처리 중 · 계속 작성 가능" : lastSavedAt ? `게시 요청 완료 · ${new Date(lastSavedAt).toLocaleTimeString("ko-KR")}` : ""}
+          </span>
           {headerActionsNode}
           {path && (
             historyData && historyData.length > 0 && !isLoading
@@ -701,11 +720,13 @@ export function Entry({
               )
               : <Button variant="outline" size="icon" className="shrink-0" disabled><History /></Button>
           )}
+          {name && path !== ".pages.yml" && <Button type="submit" form="entry-form" variant="outline" disabled={isLoading} aria-label="저장">저장</Button>}
           <Button
             type="submit"
             form="entry-form"
+            data-publish="true"
             disabled={
-              isBusy ||
+              isLoading || (isSaving && !hasChangesSinceSubmit) ||
               (showFilenameField && filenameValue.trim().length === 0) ||
               (
                 Boolean(path) &&
@@ -721,10 +742,10 @@ export function Entry({
                 )
               )
             }
-            aria-label="Save"
+            aria-label={name && path !== ".pages.yml" ? "게시" : "저장"}
           >
             <Save className="size-4 sm:hidden" />
-            <span className="hidden sm:inline">Save</span>
+            <span className="hidden sm:inline">{name && path !== ".pages.yml" ? isSaving ? "게시 중" : "게시" : "저장"}</span>
           </Button>
           {path && (
             <ButtonGroup>
@@ -752,7 +773,7 @@ export function Entry({
         </div>
       )}
     </div>
-  ), [breadcrumbNode, canDelete, canRename, filenameChanged, filenameFieldMode, filenameValue, handleDelete, handleRename, hasRegisteredChanges, headerActionsNode, headerMeta, historyData, isBusy, isFilenameUnlocked, isFormDirty, isLoading, name, path, schemaType, sha, showFilenameField, showHeaderActions]);
+  ), [breadcrumbNode, canDelete, canRename, filenameChanged, filenameFieldMode, filenameValue, handleDelete, handleRename, hasRegisteredChanges, hasChangesSinceSubmit, headerActionsNode, headerMeta, historyData, isBusy, isSaving, lastSavedAt, isFilenameUnlocked, isFormDirty, isLoading, name, path, schemaType, sha, showFilenameField, showHeaderActions]);
 
   useRepoHeader({ header: headerNode });
 
@@ -860,15 +881,16 @@ export function Entry({
   }
   
   return (
-    isLoading
+    (isLoading || (Boolean(path) && !entry))
       ? loadingSkeleton
       : <div className="space-y-4">
       {needsSignIn && <div role="alert" className="mx-auto max-w-screen-md rounded-md border p-3 text-sm">
         로그인이 만료됐어요. 초안은 이 브라우저에 보관돼요. <a className="underline" href={`/sign-in?redirect=${encodeURIComponent(window.location.pathname)}`} target="_blank" rel="noopener noreferrer">새 탭에서 다시 로그인</a>한 뒤 이 탭에서 저장해 주세요.
       </div>}
       <EntryForm
-        key={JSON.stringify([config.owner, config.repo, config.branch, name, initialPath, parent])}
-        draftStorageKey={user ? entryDraftKey(user.id, config.owner, config.repo, config.branch, path ?? `new:${name}:${parent ?? ""}`) : undefined}
+        key={JSON.stringify([user?.id, config.owner, config.repo, config.branch, name, initialPath, parent])}
+        draftStorageKey={user ? entryDraftKey(user.id, config.owner, config.repo, config.branch, path ?? `new:${name}:${parent ?? ""}:${draftIdentity}`) : undefined}
+        serverDraft={user && name && path !== ".pages.yml" ? { scope: JSON.stringify([config.owner, config.repo, config.branch, name]), identity: draftIdentity, path, baseSha: sha } : undefined}
         baseSha={sha}
         fields={entryFields}
         contentObject={entryContentObject}
@@ -878,7 +900,13 @@ export function Entry({
             ? <InputGroup data-disabled={path ? !isFilenameUnlocked : false}>
                 <InputGroupInput
                   value={filenameValue}
-                  onChange={(event) => setFilenameValue(event.target.value)}
+                  onChange={(event) => {
+                    setFilenameValue(event.target.value);
+                    unsavedRef.current = true;
+                    changeVersionRef.current++;
+                    setHasRegisteredChanges(true);
+                    setHasChangesSinceSubmit(true);
+                  }}
                   placeholder="Filename"
                   disabled={path ? !isFilenameUnlocked : false}
                   aria-label="Filename"
@@ -910,8 +938,10 @@ export function Entry({
         }
         onDirtyChange={setIsFormDirty}
         onChangeRegistered={() => {
+          unsavedRef.current = true;
           changeVersionRef.current += 1;
           setHasRegisteredChanges(true);
+          setHasChangesSinceSubmit(true);
         }}
       />
       </div>

@@ -19,6 +19,8 @@ import {
 import { zodResolver } from "@hookform/resolvers/zod";
 import { editComponents } from "@/fields/registry";
 import { useEntryDraft } from "@/hooks/use-entry-draft";
+import { useServerEntryDraft, type ServerDraftOptions } from "@/hooks/use-server-entry-draft";
+import { draftFingerprint } from "@/lib/draft-sync";
 import {
   initializeState,
   getDefaultValue,
@@ -1037,15 +1039,17 @@ const EntryForm = ({
   onChangeRegistered,
   draftStorageKey,
   baseSha,
+  serverDraft,
 }: {
   fields: Field[];
   contentObject?: Record<string, unknown>;
-  onSubmit: (values: Record<string, unknown>) => void | boolean | Promise<void | boolean>;
+  onSubmit: (values: Record<string, unknown>) => void | boolean | { saved: true; sha: string; path: string } | Promise<void | boolean | { saved: true; sha: string; path: string }>;
   filePath?: React.ReactNode;
   onDirtyChange?: (isDirty: boolean) => void;
   onChangeRegistered?: () => void;
   draftStorageKey?: string;
   baseSha?: string;
+  serverDraft?: ServerDraftOptions;
 }) => {
   const zodSchema = useMemo(() => {
     return generateZodSchema(fields);
@@ -1065,7 +1069,18 @@ const EntryForm = ({
     if (!form.formState.isDirty) form.reset(defaultValues);
   }, [defaultValues, form]);
 
-  const draft = useEntryDraft(form, draftStorageKey, baseSha, defaultValues);
+  const draft = useEntryDraft(form, draftStorageKey, baseSha, defaultValues, Boolean(serverDraft));
+  const server = useServerEntryDraft(form, serverDraft, Boolean(draft.recovery));
+  const recoveryWasOpen = useRef(false);
+  useEffect(() => {
+    if (draft.recovery) {
+      recoveryWasOpen.current = true;
+      if (server.remote && draftFingerprint(server.remote.values) === draftFingerprint(draft.recovery.values)) draft.restore();
+    } else if (recoveryWasOpen.current && !server.loading && serverDraft) {
+      recoveryWasOpen.current = false;
+      void server.save().catch(() => {});
+    }
+  }, [draft, server, serverDraft]);
 
   useEffect(() => {
     onDirtyChange?.(form.formState.isDirty);
@@ -1147,26 +1162,41 @@ const EntryForm = ({
   const handleSubmit = useCallback(
     async (values: Record<string, unknown>) => {
       const latestValues = structuredClone(form.getValues()) as Record<string, unknown>;
-      if (await onSubmit(latestValues) === true) draft.saved(latestValues);
+      if (serverDraft) await server.save();
+      const result = await onSubmit(latestValues);
+      if (result === true || (result && typeof result === "object" && result.saved)) {
+        draft.saved(latestValues, typeof result === "object" ? result.sha : undefined);
+        if (serverDraft && typeof result === "object") await server.save({ path: result.path, baseSha: result.sha });
+      }
     },
-    [form, onSubmit, draft],
+    [form, onSubmit, draft, server, serverDraft],
   );
 
   const handleError = () => {
-    toast.error("Please fix the errors before saving.", { duration: 5000 });
+    toast.error("게시 전에 필수 항목과 입력 오류를 확인해 주세요.", { duration: 5000 });
   };
 
   const handleFormSubmit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (draft.recovery) {
+      if (draft.recovery || server.loading) {
         toast.error("먼저 초안 복구 또는 서버에 저장된 글 사용을 선택해 주세요.");
         return;
       }
-      await runBeforeValidationHooks();
-      await form.handleSubmit(handleSubmit, handleError)(event);
+      try {
+        const submitter = (event.nativeEvent as SubmitEvent).submitter;
+        if (serverDraft && !(submitter instanceof HTMLElement && submitter.dataset.publish === "true")) {
+          await server.save();
+          toast.success("임시 초안을 서버에 저장했어요.");
+        } else {
+          await runBeforeValidationHooks();
+          await form.handleSubmit(handleSubmit, handleError)(event);
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "저장 전 내용을 확인하지 못했어요. 임시 초안은 유지돼요.");
+      }
     },
-    [form, handleSubmit, runBeforeValidationHooks, draft.recovery],
+    [form, handleSubmit, runBeforeValidationHooks, draft.recovery, server, serverDraft],
   );
 
   return (
@@ -1182,14 +1212,19 @@ const EntryForm = ({
               <p>이 브라우저에 저장하지 못한 초안이 있어요.{draft.recovery.baseSha !== baseSha ? " 서버의 글도 변경되었으니 복구 후 내용을 확인해 주세요." : ""}</p>
               <div className="mt-2 flex gap-2">
                 <Button type="button" size="sm" onClick={() => draft.restore()}>초안 복구</Button>
-                <Button type="button" size="sm" variant="outline" onClick={draft.discard}>서버에 저장된 글 사용</Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => { draft.discard(); if (server.remote) form.reset(server.remote.values, { keepDefaultValues: true }); }}>서버에 저장된 글 사용</Button>
               </div>
             </> : draft.storageFailed
               ? <p role="alert" className="text-destructive">초안 자동 보관에 실패했어요. 아래 ‘초안 백업’으로 파일을 받아 주세요.</p>
-              : <p role="status">{draft.lastSavedAt ? `브라우저 초안 보관 완료 · ${new Date(draft.lastSavedAt).toLocaleTimeString("ko-KR")}` : "초안 자동 보관 켜짐"}</p>}
-            <p className="mt-1 text-xs text-muted-foreground">입력할 때마다 이 브라우저에 보관해요. 사이트에 게시하려면 Save를 눌러 주세요.</p>
+              : <p role="status">{serverDraft ? server.status : draft.lastSavedAt ? `브라우저 초안 보관 · ${new Date(draft.lastSavedAt).toLocaleTimeString("ko-KR")}` : "자동 임시저장 켜짐"}</p>}
+            <p className="mt-1 text-xs text-muted-foreground">{serverDraft ? "자동 저장과 ‘저장’은 비공개 임시 초안을 서버에 보관해요. ‘게시’를 눌러야 공개 글에 반영돼요. 연결이 끊기면 브라우저에도 사본을 남겨요." : "이 브라우저에 초안을 임시 보관해요."}</p>
+            {serverDraft && server.status.includes("로그인") && <a className="underline" href={`/sign-in?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`} target="_blank" rel="noopener noreferrer">새 탭에서 다시 로그인</a>}
             <div className="mt-2 flex flex-wrap gap-2">
               <Button type="button" size="sm" variant="outline" onClick={draft.download}>초안 백업</Button>
+              {server.history.length > 0 && <details>
+                <summary className="cursor-pointer rounded-md border px-3 py-1.5">서버 이전 초안 ({server.history.length})</summary>
+                {server.history.map((previous, index) => <Button key={index} type="button" size="sm" variant="ghost" onClick={() => { void server.restore(previous.values).catch((error) => toast.error(error.message)); }}>{new Date(previous.savedAt).toLocaleString("ko-KR")} 복구</Button>)}
+              </details>}
               {draft.history.length > 0 && <details>
                 <summary className="cursor-pointer rounded-md border px-3 py-1.5">이전 초안 ({draft.history.length})</summary>
                 <ul className="mt-2 space-y-1">
@@ -1209,7 +1244,7 @@ const EntryForm = ({
             {filePath}
           </div>
         )}
-        {!draft.recovery && renderFields(fields, undefined, registerBeforeSubmitHook, runBeforeValidationHooks)}
+        {!draft.recovery && !server.loading && renderFields(fields, undefined, registerBeforeSubmitHook, runBeforeValidationHooks)}
       </form>
     </Form>
   );

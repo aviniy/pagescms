@@ -343,6 +343,7 @@ const EditComponent = forwardRef(
     const [isTransforming, setIsTransforming] = useState(false);
     const [hasHydratedEditor, setHasHydratedEditor] = useState(false);
     const [pendingUploads, setPendingUploads] = useState(0);
+    const pendingUploadsRef = useRef(0);
     const editorDirtyRef = useRef(false);
     const editorValueRef = useRef(canonicalValue);
     const syncedEditorValueRef = useRef(canonicalValue);
@@ -637,6 +638,7 @@ const EditComponent = forwardRef(
       }
       const key = `rich-text:${name}`;
       return registerBeforeSubmitHook(key, async () => {
+        if (pendingUploadsRef.current > 0) throw new Error("이미지 업로드가 끝난 뒤 저장해 주세요. 작성 내용은 임시저장돼요.");
         if (modeRef.current !== "editor") return;
         await syncEditorToSource();
       });
@@ -914,7 +916,10 @@ const EditComponent = forwardRef(
               enableImagePasteDrop={Boolean(mediaConfig)}
               onUploadImage={mediaConfig ? handleUploadImage : undefined}
               onRequestImage={mediaConfig ? handleRequestImage : undefined}
-              onPendingUploadsChange={setPendingUploads}
+              onPendingUploadsChange={(count) => {
+                pendingUploadsRef.current = count;
+                setPendingUploads(count);
+              }}
               disabled={isReadonly}
             />
           )

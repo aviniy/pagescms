@@ -119,7 +119,7 @@ export async function GET(
         path: response.data.path,
         contentObject
       }
-    });
+    }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error: any) {
     console.error(error);
     return toErrorResponse(error);
