@@ -9,6 +9,7 @@ import { hasGithubIdentity } from "@/lib/authz-shared";
 import { toErrorResponse } from "@/lib/api-error";
 import { requireApiUserSession } from "@/lib/session-server";
 import { collaboratorMatchesUser } from "@/lib/collaborator-access";
+import { getUserToken } from "@/lib/token";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,7 @@ export async function GET(
 
     const githubAccount = await getGithubAccount(user.id);
     if (githubAccount?.accessToken && hasGithubIdentity(user)) {
-      const token = githubAccount.accessToken;
+      const token = await getUserToken(user.id);
 
       const repositorySelection = searchParams.get("repository_selection");
 

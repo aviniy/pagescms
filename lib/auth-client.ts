@@ -1,7 +1,9 @@
 import { createAuthClient } from "better-auth/react";
 import { emailOTPClient } from "better-auth/client/plugins";
+import { clientSessionPolicy } from "@/lib/session-policy";
 
 const authClient = createAuthClient({
+  sessionOptions: clientSessionPolicy,
   plugins: [emailOTPClient()],
 });
 

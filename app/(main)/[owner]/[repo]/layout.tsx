@@ -6,7 +6,6 @@ import { getServerSession } from "@/lib/session-server";
 import { getRepoSnapshot } from "@/lib/github-cache-file";
 import { GithubAuthExpired } from "@/components/github-auth-expired";
 import { isGithubAuthError } from "@/lib/github-auth";
-import { invalidateSessionForGithubAuthError } from "@/lib/github-auth-server";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
@@ -59,7 +58,6 @@ export default async function Layout({
     );
   } catch (error: any) {
     if (isGithubAuthError(error)) {
-      await invalidateSessionForGithubAuthError(session);
       return <GithubAuthExpired />;
     }
 

@@ -79,3 +79,39 @@ test("drafts are scoped to account, branch and file and invalid storage is ignor
   assert.equal(parseEntryDraft("{broken"), null);
   assert.equal(parseEntryDraft('{"version":1,"savedAt":0,"values":[]}'), null);
 });
+
+test("automatic checkpoints survive reload and recover a large accidental deletion", async () => {
+  window.localStorage.clear();
+  let root = await mount();
+  const body = "작성 중인 라이트업\n".repeat(60);
+  await act(async () => form.setValue("body", body, { shouldDirty: true }));
+  await act(async () => form.setValue("body", "", { shouldDirty: true }));
+  assert.ok(draft.history.some((version) => version.values.body === body));
+  assert.ok(draft.lastSavedAt);
+  await act(async () => root.unmount());
+  root = await mount();
+  const previous = draft.history.find((version) => version.values.body === body)!;
+  await act(async () => draft.restore(previous));
+  assert.equal(form.getValues("body"), body);
+  assert.equal(parseEntryDraft(window.localStorage.getItem(key))?.values.body, body);
+  await act(async () => root.unmount());
+});
+
+test("storage failure is visible while the editable values remain available for backup", async () => {
+  window.localStorage.clear();
+  const root = await mount();
+  const proto = Object.getPrototypeOf(window.localStorage);
+  const original = proto.setItem;
+  proto.setItem = () => { throw new Error("quota exceeded"); };
+  try {
+    await act(async () => form.setValue("body", "must survive", { shouldDirty: true }));
+    assert.equal(draft.storageFailed, true);
+    assert.equal(form.getValues("body"), "must survive");
+    const reload = new window.Event("beforeunload", { cancelable: true });
+    await act(async () => { window.dispatchEvent(reload); });
+    assert.equal(reload.defaultPrevented, true);
+  } finally {
+    proto.setItem = original;
+    await act(async () => root.unmount());
+  }
+});

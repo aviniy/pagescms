@@ -11,8 +11,10 @@ import { syncGithubProfileOnLogin } from "@/lib/github-account";
 import { bindCollaboratorInvitesToUser } from "@/lib/collaborator-access";
 import { LoginEmailTemplate } from "@/components/email/login";
 import { render } from "@react-email/render";
+import { sessionPolicy } from "@/lib/session-policy";
 
 export const auth = betterAuth({
+  session: sessionPolicy,
   baseURL: getBaseUrl(),
   secret: (process.env.AUTH_SECRET || process.env.BETTER_AUTH_SECRET) as string,
   user: {

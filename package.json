@@ -8,7 +8,7 @@
   "version": "2.1.8",
   "private": true,
   "scripts": {
-    "test:editor": "tsx --test components/ui/editor/clipboard.test.ts hooks/use-entry-draft.test.tsx lib/publication.test.ts",
+    "test:editor": "tsx --test components/ui/editor/clipboard.test.ts hooks/use-entry-draft.test.tsx lib/publication.test.ts lib/github-user-token.test.ts lib/session-policy.test.ts",
     "setup:github-app": "node scripts/setup-github-app.mjs",
     "dev": "next dev",
     "build": "next build",

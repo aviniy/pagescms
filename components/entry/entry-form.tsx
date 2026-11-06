@@ -1177,16 +1177,30 @@ const EntryForm = ({
         className="w-full max-w-screen-md mx-auto grid items-start gap-6"
       >
         {draftStorageKey && (
-          <div role="status" className="rounded-md border p-3 text-sm">
+          <div className="sticky top-0 z-20 rounded-md border bg-background p-3 text-sm shadow-sm">
             {draft.recovery ? <>
               <p>이 브라우저에 저장하지 못한 초안이 있어요.{draft.recovery.baseSha !== baseSha ? " 서버의 글도 변경되었으니 복구 후 내용을 확인해 주세요." : ""}</p>
               <div className="mt-2 flex gap-2">
-                <Button type="button" size="sm" onClick={draft.restore}>초안 복구</Button>
+                <Button type="button" size="sm" onClick={() => draft.restore()}>초안 복구</Button>
                 <Button type="button" size="sm" variant="outline" onClick={draft.discard}>서버에 저장된 글 사용</Button>
               </div>
             </> : draft.storageFailed
-              ? "브라우저에 초안을 보관하지 못했어요. 새로고침 전에 본문을 복사해 주세요."
-              : "작성 내용은 이 브라우저에 자동 보관돼요. 세션 만료·새로고침 후 초안을 복구할 수 있어요."}
+              ? <p role="alert" className="text-destructive">초안 자동 보관에 실패했어요. 아래 ‘초안 백업’으로 파일을 받아 주세요.</p>
+              : <p role="status">{draft.lastSavedAt ? `브라우저 초안 보관 완료 · ${new Date(draft.lastSavedAt).toLocaleTimeString("ko-KR")}` : "초안 자동 보관 켜짐"}</p>}
+            <p className="mt-1 text-xs text-muted-foreground">입력할 때마다 이 브라우저에 보관해요. 사이트에 게시하려면 Save를 눌러 주세요.</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={draft.download}>초안 백업</Button>
+              {draft.history.length > 0 && <details>
+                <summary className="cursor-pointer rounded-md border px-3 py-1.5">이전 초안 ({draft.history.length})</summary>
+                <ul className="mt-2 space-y-1">
+                  {draft.history.map((previous, index) => <li key={`${previous.savedAt}-${index}`}>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => draft.restore(previous)}>
+                      {new Date(previous.savedAt).toLocaleString("ko-KR")} 복구
+                    </Button>
+                  </li>)}
+                </ul>
+              </details>}
+            </div>
           </div>
         )}
         {filePath && (
