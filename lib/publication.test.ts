@@ -132,6 +132,17 @@ test("a force-pushed unrelated success cannot mark the saved content as publishe
   assert.deepEqual(mock.requestedRuns, [1]);
 });
 
+test("a failed build follows a newer repair deployment containing the saved commit", async () => {
+  const mock = mockClient({
+    original: { ...run, status: "completed", conclusion: "failure" },
+    candidate: { ...run, id: 2, head_sha: nextSha, status: "completed", conclusion: "success" },
+  });
+  const progress = await getPublicationProgress(mock.client, scope);
+  assert.equal(progress.stage, "published");
+  assert.equal(progress.commitSha, nextSha);
+  assert.deepEqual(mock.requestedRuns, [2]);
+});
+
 test("recent cancellation leaves a grace period for a replacement to appear", async () => {
   const mock = mockClient({ original: { ...run, status: "completed", conclusion: "cancelled", updated_at: new Date().toISOString() } });
   const progress = await getPublicationProgress(mock.client, scope);

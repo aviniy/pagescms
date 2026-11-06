@@ -13,7 +13,7 @@ export async function getPublicationProgress(
   let run: PublicationRun | null = response.data.workflow_runs[0] ?? null;
   let followingLatest = false;
 
-  if (run?.status === "completed" && run.conclusion === "cancelled") {
+  if (run?.status === "completed" && run.conclusion !== "success") {
     const latest = await octokit.rest.actions.listWorkflowRuns({ ...scope, per_page: 1 });
     const candidate = latest.data.workflow_runs[0];
     if (candidate && candidate.id !== run.id && candidate.head_sha !== sha) {
