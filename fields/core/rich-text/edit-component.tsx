@@ -534,7 +534,7 @@ const EditComponent = forwardRef(
     );
 
     const editorToSource = useCallback(
-      async (editorContent: string) => {
+      (editorContent: string) => {
         if (!mediaConfig || !config || !editorContent) return editorContent;
 
         if (format === "html") {
@@ -889,14 +889,19 @@ const EditComponent = forwardRef(
               value={editorValue}
               onChange={(nextValue) => {
                 if (nextValue === syncedEditorValueRef.current) return;
-                if (!editorDirtyRef.current && name) {
-                  // Mark field dirty immediately without running full source/editor transforms on every keystroke.
-                  const currentValue = form.getValues(name);
-                  form.setValue(name, currentValue, {
+                editorValueRef.current = nextValue;
+                const canonical = editorToSource(nextValue);
+                skipNextSourceToEditorForCanonicalRef.current = canonical;
+                if (name) {
+                  // Keep the actual draft in the form, including text that has
+                  // never been submitted. Skip the reverse image fetch/transform.
+                  form.setValue(name, canonical, {
                     shouldDirty: true,
                     shouldTouch: true,
                     shouldValidate: false,
                   });
+                } else {
+                  onChange(canonical);
                 }
                 editorDirtyRef.current = true;
                 syncedEditorValueRef.current = nextValue;

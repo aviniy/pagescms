@@ -18,6 +18,7 @@ import {
 } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { editComponents } from "@/fields/registry";
+import { useEntryDraft } from "@/hooks/use-entry-draft";
 import {
   initializeState,
   getDefaultValue,
@@ -1034,13 +1035,17 @@ const EntryForm = ({
   filePath,
   onDirtyChange,
   onChangeRegistered,
+  draftStorageKey,
+  baseSha,
 }: {
   fields: Field[];
   contentObject?: Record<string, unknown>;
-  onSubmit: (values: Record<string, unknown>) => void;
+  onSubmit: (values: Record<string, unknown>) => void | boolean | Promise<void | boolean>;
   filePath?: React.ReactNode;
   onDirtyChange?: (isDirty: boolean) => void;
   onChangeRegistered?: () => void;
+  draftStorageKey?: string;
+  baseSha?: string;
 }) => {
   const zodSchema = useMemo(() => {
     return generateZodSchema(fields);
@@ -1057,8 +1062,10 @@ const EntryForm = ({
   });
 
   useEffect(() => {
-    form.reset(defaultValues);
+    if (!form.formState.isDirty) form.reset(defaultValues);
   }, [defaultValues, form]);
+
+  const draft = useEntryDraft(form, draftStorageKey, baseSha, defaultValues);
 
   useEffect(() => {
     onDirtyChange?.(form.formState.isDirty);
@@ -1139,10 +1146,10 @@ const EntryForm = ({
 
   const handleSubmit = useCallback(
     async (values: Record<string, unknown>) => {
-      const latestValues = form.getValues() as Record<string, unknown>;
-      await onSubmit(latestValues);
+      const latestValues = structuredClone(form.getValues()) as Record<string, unknown>;
+      if (await onSubmit(latestValues) === true) draft.saved(latestValues);
     },
-    [form, onSubmit],
+    [form, onSubmit, draft],
   );
 
   const handleError = () => {
@@ -1152,10 +1159,14 @@ const EntryForm = ({
   const handleFormSubmit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
+      if (draft.recovery) {
+        toast.error("먼저 초안 복구 또는 서버에 저장된 글 사용을 선택해 주세요.");
+        return;
+      }
       await runBeforeValidationHooks();
       await form.handleSubmit(handleSubmit, handleError)(event);
     },
-    [form, handleSubmit, runBeforeValidationHooks],
+    [form, handleSubmit, runBeforeValidationHooks, draft.recovery],
   );
 
   return (
@@ -1165,13 +1176,26 @@ const EntryForm = ({
         onSubmit={handleFormSubmit}
         className="w-full max-w-screen-md mx-auto grid items-start gap-6"
       >
+        {draftStorageKey && (
+          <div role="status" className="rounded-md border p-3 text-sm">
+            {draft.recovery ? <>
+              <p>이 브라우저에 저장하지 못한 초안이 있어요.{draft.recovery.baseSha !== baseSha ? " 서버의 글도 변경되었으니 복구 후 내용을 확인해 주세요." : ""}</p>
+              <div className="mt-2 flex gap-2">
+                <Button type="button" size="sm" onClick={draft.restore}>초안 복구</Button>
+                <Button type="button" size="sm" variant="outline" onClick={draft.discard}>서버에 저장된 글 사용</Button>
+              </div>
+            </> : draft.storageFailed
+              ? "브라우저에 초안을 보관하지 못했어요. 새로고침 전에 본문을 복사해 주세요."
+              : "작성 내용은 이 브라우저에 자동 보관돼요. 세션 만료·새로고침 후 초안을 복구할 수 있어요."}
+          </div>
+        )}
         {filePath && (
           <div className="space-y-2 overflow-hidden">
             <FormLabel>Filename</FormLabel>
             {filePath}
           </div>
         )}
-        {renderFields(fields, undefined, registerBeforeSubmitHook, runBeforeValidationHooks)}
+        {!draft.recovery && renderFields(fields, undefined, registerBeforeSubmitHook, runBeforeValidationHooks)}
       </form>
     </Form>
   );

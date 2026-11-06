@@ -36,6 +36,15 @@ test("completed build and deployment queue are 75%, site sync is 90%", () => {
   assert.equal(summarizePublication(sha, run, [build, deploy]).percent, 90);
 });
 
+test("a failed build with skipped deployment does not imply that deployment started", () => {
+  const progress = summarizePublication(sha, { ...run, status: "completed", conclusion: "failure" }, [
+    { ...build, conclusion: "failure", steps: [{ name: "Run npm run build", status: "completed", conclusion: "failure" }] },
+    { ...deploy, status: "completed", conclusion: "skipped" },
+  ]);
+  assert.ok(progress.percent < 75);
+  assert.match(progress.detail!, /빌드 실패: Run npm run build/);
+});
+
 test("100% requires both workflow success and a successful deployment job", () => {
   const jobs = [build, { ...deploy, status: "completed", conclusion: "success" }];
   assert.equal(summarizePublication(sha, run, jobs).percent, 90);

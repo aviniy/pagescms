@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useConfig } from "@/contexts/config-context";
 import { usePublication } from "@/contexts/publication-context";
+import { useUser } from "@/contexts/user-context";
+import { entryDraftKey } from "@/lib/entry-draft";
 import { parseAndValidateConfig } from "@/lib/config";
 import { resolveContentOperations } from "@/lib/operations";
 import { requireApiSuccess } from "@/lib/api-client";
@@ -111,8 +113,12 @@ export function Entry({
   const [hasRegisteredChanges, setHasRegisteredChanges] = useState(false);
   const [error, setError] = useState<string | undefined | null>(null);
   const changeVersionRef = useRef(0);
+  const unsavedRef = useRef(false);
+  unsavedRef.current = isFormDirty || hasRegisteredChanges;
+  const [needsSignIn, setNeedsSignIn] = useState(false);
   const { mutate } = useSWRConfig();
   const { trackPublication } = usePublication();
+  const { user } = useUser();
 
   const router = useRouter();
   
@@ -243,6 +249,7 @@ export function Entry({
 
   useEffect(() => {
     if (!swrEntryData || !path) return;
+    if (unsavedRef.current) return;
     setEntry(swrEntryData);
     setSha(swrEntryData.sha);
     setHasRegisteredChanges(false);
@@ -420,15 +427,19 @@ export function Entry({
 
     try {
       await savePromise;
+      setNeedsSignIn(false);
       if (submitStartChangeVersion === changeVersionRef.current) {
         setHasRegisteredChanges(false);
       }
+      return true;
     } catch (error: unknown) {
+      if ((error as { status?: number })?.status === 401) setNeedsSignIn(true);
       if (error instanceof Error) {
         console.error(error.message);
       } else {
         console.error(error);
       }
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -777,7 +788,7 @@ export function Entry({
   ), [path]);
 
   
-  if (error) {
+  if (error && !entry) {
     // TODO: should we use a custom error class with code?
     // TODO: errors show no header (unlike collection and media). Consider standardizing templates.
     if (error === "Not found") {
@@ -851,7 +862,14 @@ export function Entry({
   return (
     isLoading
       ? loadingSkeleton
-      : <EntryForm
+      : <div className="space-y-4">
+      {needsSignIn && <div role="alert" className="mx-auto max-w-screen-md rounded-md border p-3 text-sm">
+        로그인이 만료됐어요. 초안은 이 브라우저에 보관돼요. <a className="underline" href={`/sign-in?redirect=${encodeURIComponent(window.location.pathname)}`} target="_blank" rel="noopener noreferrer">새 탭에서 다시 로그인</a>한 뒤 이 탭에서 저장해 주세요.
+      </div>}
+      <EntryForm
+        key={JSON.stringify([config.owner, config.repo, config.branch, name, initialPath, parent])}
+        draftStorageKey={user ? entryDraftKey(user.id, config.owner, config.repo, config.branch, path ?? `new:${name}:${parent ?? ""}`) : undefined}
+        baseSha={sha}
         fields={entryFields}
         contentObject={entryContentObject}
         onSubmit={onSubmit}
@@ -896,5 +914,6 @@ export function Entry({
           setHasRegisteredChanges(true);
         }}
       />
+      </div>
   );
 };

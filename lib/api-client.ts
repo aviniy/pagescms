@@ -19,7 +19,7 @@ const requireApiSuccess = async <T = any>(
 
   if (!response.ok) {
     const message = payload?.message || `${fallbackMessage}: ${response.status} ${response.statusText}`;
-    throw new Error(message);
+    throw Object.assign(new Error(message), { status: response.status });
   }
 
   if (payload && typeof payload === "object" && "status" in payload && payload.status !== "success") {

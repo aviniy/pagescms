@@ -47,7 +47,8 @@ export function summarizePublication(
   const buildSteps = buildJobs.flatMap((job) => job.steps ?? []);
   const finishedSteps = buildSteps.filter((step) => step.status === "completed").length;
   const buildPercent = buildSteps.length ? 25 + Math.floor(45 * finishedSteps / buildSteps.length) : 25;
-  const deployStarted = deploymentJobs.some((job) => job.status === "in_progress" || job.status === "completed");
+  const deployStarted = deploymentJobs.some((job) => job.status === "in_progress"
+    || (job.status === "completed" && !["skipped", "cancelled"].includes(job.conclusion ?? "")));
   const buildFinished = buildJobs.length > 0 && buildJobs.every((job) => job.status === "completed" && job.conclusion === "success");
   const percent = deployStarted ? 90 : buildFinished ? 75 : jobs.some((job) => job.status === "in_progress") ? buildPercent : 20;
 
@@ -62,7 +63,11 @@ export function summarizePublication(
     if (run.conclusion === "cancelled") {
       return { ...base, stage: "cancelled", percent, message: "배포 취소 · 글은 저장되어 있어요", terminal: true };
     }
-    return { ...base, stage: "failed", percent, message: "게시 실패 · 글은 저장되어 있어요", terminal: true };
+    const failedJob = jobs.find((job) => ["failure", "timed_out", "action_required"].includes(job.conclusion ?? ""));
+    const failedStep = failedJob?.steps?.find((step) => step.conclusion === "failure");
+    return { ...base, stage: "failed", percent, message: "게시 실패 · 글은 저장되어 있어요",
+      detail: failedJob ? `${deploymentJobs.includes(failedJob) ? "배포" : "빌드"} 실패${failedStep ? `: ${failedStep.name}` : ""} · 배포 상세에서 원인을 확인할 수 있어요.` : null,
+      terminal: true };
   }
 
   if (deployStarted) {

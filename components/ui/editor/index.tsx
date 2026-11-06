@@ -12,9 +12,10 @@ import TableRow from "@tiptap/extension-table-row";
 import TableHeader from "@tiptap/extension-table-header";
 import TableCell from "@tiptap/extension-table-cell";
 import { Markdown } from "@tiptap/markdown";
-import { DOMSerializer, type Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { type Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import { EnhancedCodeBlock } from "./code-block";
+import { copyEditorSelection, pasteEditorMarkdown } from "./clipboard";
 import {
   Bold,
   Columns3,
@@ -358,33 +359,14 @@ export function Editor({
         class: tiptapSurfaceClass,
       },
       handleDOMEvents: {
-        copy: (_view, event) => {
+        copy: (_view, event): boolean => {
           if (!editor) return false;
 
-          const copyEvent = event as ClipboardEvent;
-          if (!copyEvent.clipboardData || editor.state.selection.empty) return false;
-
-          const selectionFragment = editor.state.selection.content().content;
-
-          if (format === "markdown") {
-            const markdown = editor.storage.markdown?.manager?.serialize(selectionFragment.toJSON()) ?? "";
-            copyEvent.clipboardData.setData("text/plain", markdown);
-            copyEvent.preventDefault();
-            return true;
-          }
-
-          const serializer = DOMSerializer.fromSchema(editor.state.schema);
-          const container = document.createElement("div");
-          container.append(serializer.serializeFragment(selectionFragment));
-          const html = container.innerHTML;
-
-          copyEvent.clipboardData.setData("text/html", html);
-          copyEvent.clipboardData.setData("text/plain", html);
-          copyEvent.preventDefault();
-          return true;
+          return copyEditorSelection(editor, event as ClipboardEvent, format);
         },
       },
-      handlePaste: (_view, event) => {
+      handlePaste: (_view, event): boolean => {
+        if (editor && pasteEditorMarkdown(editor, event, format)) return true;
         if (!enableImages || !enableImagePasteDrop) return false;
         const files = Array.from(event.clipboardData?.files ?? []).filter((file) =>
           file.type.startsWith("image/"),
