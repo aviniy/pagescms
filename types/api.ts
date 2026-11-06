@@ -29,6 +29,7 @@ export type EntryHistoryItem = {
 
 export type EntryData = {
   sha: string;
+  commitSha?: string;
   path: string;
   name?: string;
   contentObject?: Record<string, unknown>;
@@ -37,6 +38,7 @@ export type EntryData = {
 export type FileSaveData = {
   type?: string;
   sha?: string;
+  commitSha?: string;
   name?: string;
   path?: string;
   extension?: string;

@@ -31,6 +31,14 @@ Use that if you want to:
 
 ## Local development
 
+### Publication progress in this fork
+
+Saving content opens a Korean publication progress panel that follows the saved commit through the site's existing `.github/workflows/deploy.yml` push workflow. It polls every eight seconds, restores tracking after a refresh in the same browser tab, and follows a replacement deployment only if it contains the saved commit. The GitHub App needs Actions read access (the existing Actions write permission includes it).
+
+Percentages describe workflow milestones, not elapsed time: saved (10%), queued (20%), build steps (25–70%), waiting to deploy (75%), deploying (90%), and a successful deployment and workflow (100%). Failed, cancelled, inaccessible, or unverified deployments never become 100%. Tracking stops after completion or 30 minutes; the panel links to GitHub for details. For a site with a different deployment workflow filename, update `WORKFLOW` in `lib/github-publication.ts`.
+
+Run the publication regression checks with `node node_modules/tsx/dist/cli.mjs --test lib/publication.test.ts`.
+
 ### What you need
 
 - PostgreSQL

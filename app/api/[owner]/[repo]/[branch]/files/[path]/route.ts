@@ -275,6 +275,7 @@ export async function POST(
       data: {
         type: response?.data.content?.type,
         sha: response?.data.content?.sha,
+        commitSha: response?.data.commit?.sha,
         name: response?.data.content?.name,
         path: savedPath,
         extension: getFileExtension(response?.data.content?.name || ""),

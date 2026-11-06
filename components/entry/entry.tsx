@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useConfig } from "@/contexts/config-context";
+import { usePublication } from "@/contexts/publication-context";
 import { parseAndValidateConfig } from "@/lib/config";
 import { resolveContentOperations } from "@/lib/operations";
 import { requireApiSuccess } from "@/lib/api-client";
@@ -111,6 +112,7 @@ export function Entry({
   const [error, setError] = useState<string | undefined | null>(null);
   const changeVersionRef = useRef(0);
   const { mutate } = useSWRConfig();
+  const { trackPublication } = usePublication();
 
   const router = useRouter();
   
@@ -382,6 +384,15 @@ export function Entry({
         );
         
         if (data.data.sha !== sha) setSha(data.data.sha);
+        if (data.data.commitSha && path !== ".pages.yml") {
+          trackPublication({
+            owner: config.owner,
+            repo: config.repo,
+            branch: config.branch,
+            commitSha: data.data.commitSha,
+            path: data.data.path ?? savePath,
+          });
+        }
         if (submitStartChangeVersion === changeVersionRef.current) {
           setHasRegisteredChanges(false);
         }

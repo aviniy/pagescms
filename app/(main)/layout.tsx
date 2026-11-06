@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { getAccounts } from "@/lib/accounts";
 import { UserProvider } from "@/contexts/user-context";
+import { PublicationProvider } from "@/contexts/publication-context";
 import { User } from "@/types/user";
 import { getServerSession } from "@/lib/session-server";
 import { GithubAuthExpired } from "@/components/github-auth-expired";
@@ -42,7 +43,9 @@ export default async function Layout({
   
 	return (
     <UserProvider user={userWithAccounts}>
-      {children}
+      <PublicationProvider userId={userWithAccounts.id}>
+        {children}
+      </PublicationProvider>
     </UserProvider>
   );
 }
