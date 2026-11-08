@@ -16,6 +16,7 @@ import { type Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import { EnhancedCodeBlock } from "./code-block";
 import { copyEditorSelection, pasteEditorMarkdown } from "./clipboard";
+import { useImageUploadLifecycle } from "@/hooks/use-image-upload-lifecycle";
 import {
   Bold,
   Columns3,
@@ -293,9 +294,8 @@ export function Editor({
   const bubbleMenuRef = useRef<HTMLDivElement>(null);
   const linkInputRef = useRef<HTMLInputElement>(null);
   const lastEmittedValueRef = useRef<string>(value);
-  const pendingUploadsRef = useRef(0);
-  const objectUrlByUploadIdRef = useRef(new Map<string, string>());
-  const expectedBlobByUploadIdRef = useRef(new Map<string, string>());
+  const { pendingUploadsRef, objectUrlByUploadIdRef, expectedBlobByUploadIdRef, updatePendingUploads } = useImageUploadLifecycle(onPendingUploadsChange);
+  const insertLocalImageFileRef = useRef<((file: File, source: "paste" | "drop" | "slash", attrs?: { alt?: string; title?: string }) => Promise<void>) | null>(null);
   const tiptapSurfaceClass = cn(
     "border-input placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 min-h-16 w-full rounded-md border bg-transparent px-3 py-2 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] md:text-sm [&_p.is-empty::before]:text-muted-foreground [&_p.is-empty::before]:content-[attr(data-placeholder)] [&_p.is-empty::before]:pointer-events-none [&_p.is-empty::before]:float-left [&_p.is-empty::before]:h-0 [&_td_p.is-empty::before]:content-none [&_th_p.is-empty::before]:content-none [&_img[data-uploading=true]]:opacity-70 [&_img[data-uploading=true]]:animate-pulse [&_img[data-upload-error]]:ring-2 [&_img[data-upload-error]]:ring-destructive [&_img[data-upload-error]]:ring-offset-2 [&_img[data-upload-error]]:ring-offset-background",
     editorClassName,
@@ -343,7 +343,7 @@ export function Editor({
       SlashCommands.configure({
         onRequestImage: enableImages ? (onRequestImage ?? null) : null,
         onInsertLocalImageFile: ({ file, alt, title }) => {
-          void insertLocalImageFile(file, "slash", {
+          void insertLocalImageFileRef.current?.(file, "slash", {
             ...(alt ? { alt } : {}),
             ...(title ? { title } : {}),
           });
@@ -535,26 +535,13 @@ export function Editor({
     };
   }, [editor, enableImages]);
 
+  // Slash extensions retain their initial callbacks, including the first render
+  // before useEditor creates an instance. Resolve the current uploader via a ref.
   useEffect(() => {
-    onPendingUploadsChange?.(pendingUploadsRef.current);
-
-    return () => {
-      for (const url of objectUrlByUploadIdRef.current.values()) {
-        URL.revokeObjectURL(url);
-      }
-      objectUrlByUploadIdRef.current.clear();
-      expectedBlobByUploadIdRef.current.clear();
-      pendingUploadsRef.current = 0;
-      onPendingUploadsChange?.(0);
-    };
-  }, [onPendingUploadsChange]);
+    insertLocalImageFileRef.current = editor ? insertLocalImageFile : null;
+  });
 
   if (!editor) return null;
-
-  const updatePendingUploads = (delta: number): void => {
-    pendingUploadsRef.current = Math.max(0, pendingUploadsRef.current + delta);
-    onPendingUploadsChange?.(pendingUploadsRef.current);
-  };
 
   const createUploadId = (): string =>
     typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -699,16 +686,8 @@ export function Editor({
       }
 
       const preloaded = await preloadImageSource(resolved.src);
-      if (!preloaded) {
-        finalizeImageUpload(uploadId, (attrs) => ({
-          ...attrs,
-          uploading: false,
-          uploadError: "Image uploaded, but preview failed to load",
-        }));
-        cleanupUpload(uploadId, { revokeBlob: false });
-        return;
-      }
-
+      // An accepted upload must retain its durable URL even if a CDN preview
+      // is temporarily unavailable. Blob URLs cannot survive a reload.
       finalizeImageUpload(uploadId, (attrs): UploadableImageAttrs | null => {
         const expectedBlob = expectedBlobByUploadIdRef.current.get(uploadId);
         const currentSrc = typeof attrs.src === "string" ? attrs.src : "";
@@ -720,7 +699,7 @@ export function Editor({
           alt: resolved.alt ?? (typeof attrs.alt === "string" ? attrs.alt : undefined),
           title: resolved.title ?? (typeof attrs.title === "string" ? attrs.title : undefined),
           uploading: false,
-          uploadError: null,
+          uploadError: preloaded ? null : "Image uploaded, but preview failed to load",
           uploadId: null,
         };
       });

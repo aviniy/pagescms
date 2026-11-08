@@ -28,6 +28,7 @@ import {
   rawToRelativeUrls,
   relativeToRawUrls,
   swapPrefix,
+  isLocalImageUrl,
 } from "@/lib/github-image";
 import {
   decodePathSafely,
@@ -344,6 +345,10 @@ const EditComponent = forwardRef(
     const [hasHydratedEditor, setHasHydratedEditor] = useState(false);
     const [pendingUploads, setPendingUploads] = useState(0);
     const pendingUploadsRef = useRef(0);
+    const handlePendingUploadsChange = useCallback((count: number) => {
+      pendingUploadsRef.current = count;
+      setPendingUploads(count);
+    }, []);
     const editorDirtyRef = useRef(false);
     const editorValueRef = useRef(canonicalValue);
     const syncedEditorValueRef = useRef(canonicalValue);
@@ -421,7 +426,7 @@ const EditComponent = forwardRef(
     const toDisplayImageUrl = useCallback(
       async (url: string) => {
         if (!config || !mediaConfig) return url;
-        if (!url || isExternalUrl(url) || isDataUrl(url)) return url;
+        if (!url || isExternalUrl(url) || isDataUrl(url) || isLocalImageUrl(url)) return url;
         const decodedUrl = normalizeMediaPath(decodePathSafely(url));
         const canonicalOutputPath = swapPrefix(
           decodedUrl,
@@ -467,6 +472,7 @@ const EditComponent = forwardRef(
       (url: string) => {
         if (!config || !mediaConfig) return url;
         if (!url) return url;
+        if (isLocalImageUrl(url)) return url;
         if (isExternalUrl(url) && !url.startsWith("https://raw.githubusercontent.com/")) {
           return url;
         }
@@ -916,10 +922,7 @@ const EditComponent = forwardRef(
               enableImagePasteDrop={Boolean(mediaConfig)}
               onUploadImage={mediaConfig ? handleUploadImage : undefined}
               onRequestImage={mediaConfig ? handleRequestImage : undefined}
-              onPendingUploadsChange={(count) => {
-                pendingUploadsRef.current = count;
-                setPendingUploads(count);
-              }}
+              onPendingUploadsChange={handlePendingUploadsChange}
               disabled={isReadonly}
             />
           )

@@ -15,6 +15,7 @@ import { requireApiSuccess } from "@/lib/api-client";
 const ttl = 30000; // TTL for the cache (30 seconds)
 const cache: { [key: string]: any } = {};
 const requests: { [key: string]: Promise<any> | undefined } = {};
+const isLocalImageUrl = (url: string) => /^(?:blob:|data:image\/)/i.test(url);
 
 const canonicalizeFileName = (input: string) => {
   return decodePathSafely(getFileName(input || ""));
@@ -30,6 +31,7 @@ const getRelativeUrl = (
   path: string,
   encode = true
 ) => {
+  if (isLocalImageUrl(path)) return path;
   let relativePath = path;
 
   if (path.startsWith("https://raw.githubusercontent.com/")) {
@@ -126,6 +128,7 @@ const getRawUrl = async (
 const normalizeImagePathInput = (input: string) => {
   if (!input) return null;
   const value = decodePathSafely(input.trim());
+  if (isLocalImageUrl(value)) return null;
 
   const markdownMatch = value.match(/^\[.*?\]\((.+)\)$/);
   const markdownLooseMatch = value.match(/^\[.*?\]\((.+)$/);
@@ -198,7 +201,7 @@ const relativeToRawUrls = async (
   const uniqueSources = Array.from(new Set(
     matches
       .map((match) => match[1] || match[2])
-      .filter((src) => !src.startsWith("http://") && !src.startsWith("https://") && !src.startsWith("data:image/")),
+      .filter((src) => !src.startsWith("http://") && !src.startsWith("https://") && !isLocalImageUrl(src)),
   ));
 
   if (uniqueSources.length === 0) return html;
@@ -235,7 +238,7 @@ const swapPrefix = (
     || path.startsWith("//")
     || path.startsWith("http://")
     || path.startsWith("https://")
-    || path.startsWith("data:image/")
+    || isLocalImageUrl(path)
     || !path.startsWith(from)
   ) return path;
   
@@ -296,4 +299,4 @@ const getImgSrcs = (html: string) => {
   return Array.from(html.matchAll(regex));
 }
 
-export { getRelativeUrl, getRawUrl, relativeToRawUrls, rawToRelativeUrls, swapPrefix, htmlSwapPrefix, encodePath, getImgSrcs };
+export { getRelativeUrl, getRawUrl, relativeToRawUrls, rawToRelativeUrls, swapPrefix, htmlSwapPrefix, encodePath, getImgSrcs, isLocalImageUrl };
