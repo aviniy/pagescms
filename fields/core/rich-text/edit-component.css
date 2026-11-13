@@ -1,7 +1,10 @@
 @reference "../../../app/globals.css";
 
 @layer components {
+  /* Grid items must shrink before a long code line can scroll inside its pre. */
   .cn-editor .tiptap {
+   min-width: 0;
+   max-width: 100%;
    @apply border-input placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 min-h-16 w-full rounded-md border bg-transparent px-3 py-2 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] md:text-sm;
  }
 
@@ -58,7 +61,10 @@
  }
 
  .cn-editor .tiptap pre {
-   @apply my-4 overflow-x-auto rounded-xl bg-accent p-4;
+   @apply my-4 min-w-0 max-w-full overflow-x-auto rounded-xl bg-accent p-4;
+   white-space: pre;
+   overflow-wrap: normal;
+   word-break: normal;
  }
 
  .cn-editor .tiptap pre code {

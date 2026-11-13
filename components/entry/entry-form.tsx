@@ -1204,7 +1204,7 @@ const EntryForm = ({
       <form
         id="entry-form"
         onSubmit={handleFormSubmit}
-        className="w-full max-w-screen-md mx-auto grid items-start gap-6"
+        className="min-w-0 w-full max-w-screen-md mx-auto grid grid-cols-1 items-start gap-6"
       >
         {draftStorageKey && (
           <div className="sticky top-0 z-20 rounded-md border bg-background p-3 text-sm shadow-sm">
