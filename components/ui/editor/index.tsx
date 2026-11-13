@@ -15,6 +15,7 @@ import { Markdown } from "@tiptap/markdown";
 import { type Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import { EnhancedCodeBlock } from "./code-block";
+import { createMarkdownTextblocks } from "./markdown-bold";
 import { copyEditorSelection, pasteEditorMarkdown } from "./clipboard";
 import { useImageUploadLifecycle } from "@/hooks/use-image-upload-lifecycle";
 import {
@@ -285,6 +286,7 @@ export function Editor({
   ...props
 }: EditorProps) {
   const [showLinkInput, setShowLinkInput] = useState(false);
+  const [markdownTextblocks] = useState(createMarkdownTextblocks);
   const [showTableActions, setShowTableActions] = useState(false);
   const [showAltInput, setShowAltInput] = useState(false);
   const [isInTable, setIsInTable] = useState(false);
@@ -304,10 +306,13 @@ export function Editor({
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
+        paragraph: false,
+        heading: false,
         link: false,
         underline: false,
         codeBlock: false,
       }),
+      ...markdownTextblocks,
       EnhancedCodeBlock,
       Underline,
       Link.configure({
