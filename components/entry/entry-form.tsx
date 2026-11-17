@@ -1075,12 +1075,24 @@ const EntryForm = ({
   useEffect(() => {
     if (draft.recovery) {
       recoveryWasOpen.current = true;
-      if (server.remote && draftFingerprint(server.remote.values) === draftFingerprint(draft.recovery.values)) draft.restore();
+      if (!server.loading && serverDraft) {
+        const local = draft.recovery;
+        const remote = server.remote;
+        if (remote && draftFingerprint(remote.values) === draftFingerprint(local.values)) draft.restore();
+        else if (local.baseSha === baseSha) {
+          // Resume the newest compatible copy automatically; keep explicit recovery for conflicts.
+          if (!remote || local.savedAt >= Date.parse(remote.savedAt)) draft.restore();
+          else {
+            draft.discard();
+            form.reset(remote.values, { keepDefaultValues: true });
+          }
+        }
+      }
     } else if (recoveryWasOpen.current && !server.loading && serverDraft) {
       recoveryWasOpen.current = false;
       void server.save().catch(() => {});
     }
-  }, [draft, server, serverDraft]);
+  }, [baseSha, draft, form, server, serverDraft]);
 
   useEffect(() => {
     onDirtyChange?.(form.formState.isDirty);

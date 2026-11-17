@@ -33,6 +33,7 @@ import { requireApiSuccess } from "@/lib/api-client";
 import { EmptyCreate } from "@/components/empty-create";
 import { FileOptions } from "@/components/file/file-options";
 import { CollectionTable } from "./collection-table";
+import { CollectionDrafts } from "./collection-drafts";
 import { FolderCreate } from "@/components/folder-create";
 import { resolveContentOperations } from "@/lib/operations";
 import { useRepoHeader } from "@/components/repo/repo-header-context";
@@ -1030,5 +1031,13 @@ export function Collection({ name, path }: { name: string; path?: string }) {
     />
   );
 
-  return <div className="min-w-0 flex flex-col space-y-6">{contentNode}</div>;
+  return <div className="min-w-0 flex flex-col space-y-6">
+    <CollectionDrafts
+      key={JSON.stringify([config.owner, config.repo, config.branch, name])}
+      scope={JSON.stringify([config.owner, config.repo, config.branch, name])}
+      collectionUrl={`/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/collection/${encodeURIComponent(name)}`}
+      titleField={getPrimaryField(schema) ?? "title"}
+    />
+    {contentNode}
+  </div>;
 }

@@ -1,4 +1,4 @@
-import { and, eq, or, desc } from "drizzle-orm";
+import { and, eq, or, desc, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "@/db";
 import { entryDraftTable as drafts } from "@/db/schema";
@@ -6,6 +6,16 @@ import { createHttpError } from "@/lib/api-error";
 import { draftFingerprint } from "@/lib/draft-sync";
 
 export type DraftAddress = { scope: string; identity: string; path?: string };
+export async function listServerDrafts(userId: string, scope: string, titleField = "title") {
+  // The list needs summaries, not full bodies or checkpoint histories.
+  return db.selectDistinctOn([sql`coalesce(${drafts.path}, ${drafts.identity})`], {
+    identity: drafts.identity, path: drafts.path, savedAt: drafts.savedAt,
+    title: sql<string | null>`${drafts.values} ->> ${titleField}`,
+    parent: sql<string | null>`${drafts.values} -> '__pagesCmsDraftEditor' ->> 'parent'`,
+  }).from(drafts).where(and(eq(drafts.userId, userId), eq(drafts.scope, scope)))
+    .orderBy(sql`coalesce(${drafts.path}, ${drafts.identity})`, desc(drafts.savedAt));
+}
+
 export async function readServerDraft(userId: string, address: DraftAddress) {
   const [row] = await db.select().from(drafts).where(and(
     eq(drafts.userId, userId), eq(drafts.scope, address.scope),

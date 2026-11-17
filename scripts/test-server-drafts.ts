@@ -7,7 +7,7 @@ async function main() {
   if (!process.env.DRAFT_TEST_DATABASE_URL) throw new Error("Set DRAFT_TEST_DATABASE_URL to an isolated test branch connection string.");
   process.env.DATABASE_URL = process.env.DRAFT_TEST_DATABASE_URL;
   const { db } = await import("../db");
-  const { readServerDraft, writeServerDraft } = await import("../lib/server-entry-draft");
+  const { listServerDrafts, readServerDraft, writeServerDraft } = await import("../lib/server-entry-draft");
   const a = `draft-test-${randomUUID()}`, b = `draft-test-${randomUUID()}`;
   await db.insert(userTable).values([a, b].map((id) => ({ id, name: "Draft integration test", email: `${id}@example.invalid` })));
   try {
@@ -21,6 +21,9 @@ async function main() {
     }
     assert.equal((await readServerDraft(a, address))?.values.body, "E");
     assert.equal(await readServerDraft(b, address), null);
+    assert.equal((await listServerDrafts(a, address.scope)).length, 1);
+    assert.equal((await listServerDrafts(b, address.scope)).length, 0);
+    assert.equal((await listServerDrafts(a, "different-scope")).length, 0);
     const replay = await writeServerDraft(a, address, { version: 4, requestId: lastId, values: { body: "E" } });
     assert.equal(replay.version, 5);
     await assert.rejects(writeServerDraft(a, address, { version: 4, requestId: randomUUID(), values: { body: "stale" } }), (e: unknown) => (e as { status: number }).status === 409);

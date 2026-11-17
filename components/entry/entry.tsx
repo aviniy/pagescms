@@ -109,7 +109,7 @@ export function Entry({
   onSave?: (data: Record<string, unknown>) => void;
 }) {
   const [path, setPath] = useState<string | undefined>(initialPath);
-  const [draftIdentity] = useState(() => initialPath ?? (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("draft") : null) ?? crypto.randomUUID());
+  const [draftIdentity] = useState(() => (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("draft") : null) ?? initialPath ?? crypto.randomUUID());
   const [entry, setEntry] = useState<EntryData | null>();
   const [sha, setSha] = useState<string | undefined>();
   const [displayTitle, setDisplayTitle] = useState<string>(() => {
@@ -890,7 +890,7 @@ export function Entry({
       <EntryForm
         key={JSON.stringify([user?.id, config.owner, config.repo, config.branch, name, initialPath, parent])}
         draftStorageKey={user ? entryDraftKey(user.id, config.owner, config.repo, config.branch, path ?? `new:${name}:${parent ?? ""}:${draftIdentity}`) : undefined}
-        serverDraft={user && name && path !== ".pages.yml" ? { scope: JSON.stringify([config.owner, config.repo, config.branch, name]), identity: draftIdentity, path, baseSha: sha } : undefined}
+        serverDraft={user && name && path !== ".pages.yml" ? { scope: JSON.stringify([config.owner, config.repo, config.branch, name]), identity: draftIdentity, path, baseSha: sha, editorState: { filename: filenameValue, parent }, onRestoreEditorState: (state) => setFilenameValue(state.filename) } : undefined}
         baseSha={sha}
         fields={entryFields}
         contentObject={entryContentObject}

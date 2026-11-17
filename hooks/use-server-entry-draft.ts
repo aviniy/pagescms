@@ -3,7 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import type { FieldValues, UseFormReturn } from "react-hook-form";
 import { createDraftSync, draftFingerprint, type ServerDraft } from "@/lib/draft-sync";
 
-export type ServerDraftOptions = { scope: string; identity: string; path?: string; baseSha?: string; endpoint?: string };
+import { packDraftValues, unpackDraftValues, type DraftEditorState } from "@/lib/draft-editor-state";
+
+export type ServerDraftOptions = { scope: string; identity: string; path?: string; baseSha?: string; endpoint?: string; editorState?: DraftEditorState; onRestoreEditorState?: (state: DraftEditorState) => void };
 export function useServerEntryDraft(form: UseFormReturn<FieldValues>, address: ServerDraftOptions | undefined, localRecovery: boolean) {
   const latest = useRef({ form, address, localRecovery });
   latest.current = { form, address, localRecovery };
@@ -40,11 +42,13 @@ export function useServerEntryDraft(form: UseFormReturn<FieldValues>, address: S
       onLoad: (draft) => {
         lastConfirmed = draft;
         if (!active) return;
-        setRemote(draft);
+        const restored = draft ? unpackDraftValues(draft.values) : undefined;
+        setRemote(draft && restored ? { ...draft, values: restored.values } : null);
+        if (restored?.editor) latest.current.address?.onRestoreEditorState?.(restored.editor);
         if (draft) {
-          setHistory(draft.history); setSavedAt(draft.savedAt);
+          setHistory(draft.history.map((item) => ({ ...item, values: unpackDraftValues(item.values).values }))); setSavedAt(draft.savedAt);
           if (!changed && !latest.current.form.formState.isDirty && !latest.current.localRecovery) {
-            latest.current.form.reset(draft.values, { keepDefaultValues: true });
+            latest.current.form.reset(restored!.values, { keepDefaultValues: true });
           }
         }
         setLoading(false); setStatus(draft ? `서버 임시저장 완료 · ${new Date(draft.savedAt).toLocaleTimeString("ko-KR")}` : "자동 임시저장 켜짐");
@@ -52,9 +56,10 @@ export function useServerEntryDraft(form: UseFormReturn<FieldValues>, address: S
       onSaved: (draft) => {
         lastConfirmed = draft;
         if (!active) return;
-        setRemote(draft);
-        setSavedAt(draft.savedAt); setHistory(draft.history);
-        setStatus(draftFingerprint(draft.values) === draftFingerprint(latest.current.form.getValues())
+        const restored = unpackDraftValues(draft.values);
+        setRemote({ ...draft, values: restored.values });
+        setSavedAt(draft.savedAt); setHistory(draft.history.map((item) => ({ ...item, values: unpackDraftValues(item.values).values })));
+        setStatus(draftFingerprint(restored.values) === draftFingerprint(latest.current.form.getValues())
           ? `서버 임시저장 완료 · ${new Date(draft.savedAt).toLocaleTimeString("ko-KR")}` : "추가 수정 내용 임시저장 대기 중…");
       },
     });
@@ -68,10 +73,10 @@ export function useServerEntryDraft(form: UseFormReturn<FieldValues>, address: S
       clearTimeout(timer); firstChange = 0;
       changed = true;
       pending++; setStatus("서버 임시저장 중… · 계속 작성할 수 있어요");
-      const snapshot = { values: structuredClone(latest.current.form.getValues()), path: latest.current.address?.path, baseSha: latest.current.address?.baseSha, ...metadata };
+      const snapshot = { values: packDraftValues(structuredClone(latest.current.form.getValues()), latest.current.address?.editorState), path: latest.current.address?.path, baseSha: latest.current.address?.baseSha, ...metadata };
       try {
         await sync.save(snapshot);
-        changed = draftFingerprint(snapshot.values) !== draftFingerprint(latest.current.form.getValues());
+        changed = draftFingerprint(unpackDraftValues(snapshot.values).values) !== draftFingerprint(latest.current.form.getValues());
         if (active && lastConfirmed) setStatus(changed ? "추가 수정 내용 임시저장 대기 중…" : `서버 임시저장 완료 · ${new Date(lastConfirmed.savedAt).toLocaleTimeString("ko-KR")}`);
       } catch (error) {
         changed = true;

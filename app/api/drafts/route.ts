@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { requireApiUserSession } from "@/lib/session-server";
 import { createHttpError, toErrorResponse } from "@/lib/api-error";
-import { readServerDraft, writeServerDraft } from "@/lib/server-entry-draft";
+import { listServerDrafts, readServerDraft, writeServerDraft } from "@/lib/server-entry-draft";
 
 const addressSchema = z.object({
   scope: z.string().min(1).max(1500), identity: z.string().min(1).max(1500), path: z.string().max(1500).optional(),
@@ -16,7 +16,12 @@ export async function GET(request: NextRequest) {
   try {
     const session = await requireApiUserSession();
     if ("response" in session) return session.response;
-    const address = addressSchema.parse(Object.fromEntries(request.nextUrl.searchParams));
+    const params = Object.fromEntries(request.nextUrl.searchParams);
+    if (params.list === "1") {
+      const { scope, titleField } = z.object({ scope: addressSchema.shape.scope, titleField: z.string().max(1500).optional() }).parse(params);
+      return Response.json({ data: await listServerDrafts(session.user.id, scope, titleField) }, { headers });
+    }
+    const address = addressSchema.parse(params);
     return Response.json({ data: await readServerDraft(session.user.id, address) }, { headers });
   } catch (error) { return toErrorResponse(error); }
 }
