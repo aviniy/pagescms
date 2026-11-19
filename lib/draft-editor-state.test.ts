@@ -15,7 +15,7 @@ test("old drafts without editor settings still reopen", () => {
   assert.deepEqual(unpackDraftValues({ body: "old" }), { values: { body: "old" }, editor: undefined });
 });
 test("resume links keep a new draft's identity and folder and use the saved path after publication", () => {
-  const draft = { identity: "draft&id", path: null, parent: "posts/한국어 #", title: "title", savedAt: "" };
+  const draft = { identity: "draft&id", path: null, parent: "posts/한국어 #", title: "title", savedAt: "", requestId: "revision" };
   const fresh = new URL(draftResumeUrl("/owner/repo/main/collection/posts", draft), "https://cms.example");
   assert.equal(fresh.pathname, "/owner/repo/main/collection/posts/new");
   assert.equal(fresh.searchParams.get("draft"), draft.identity);

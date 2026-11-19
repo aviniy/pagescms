@@ -7,7 +7,7 @@ async function main() {
   if (!process.env.DRAFT_TEST_DATABASE_URL) throw new Error("Set DRAFT_TEST_DATABASE_URL to an isolated test branch connection string.");
   process.env.DATABASE_URL = process.env.DRAFT_TEST_DATABASE_URL;
   const { db } = await import("../db");
-  const { listServerDrafts, readServerDraft, writeServerDraft } = await import("../lib/server-entry-draft");
+  const { deleteServerDraft, listServerDrafts, readServerDraft, writeServerDraft } = await import("../lib/server-entry-draft");
   const a = `draft-test-${randomUUID()}`, b = `draft-test-${randomUUID()}`;
   await db.insert(userTable).values([a, b].map((id) => ({ id, name: "Draft integration test", email: `${id}@example.invalid` })));
   try {
@@ -31,7 +31,17 @@ async function main() {
     assert.equal(simultaneous.filter((r) => r.status === "fulfilled").length, 1);
     const saved = await readServerDraft(a, address);
     assert.equal(saved?.version, 6); assert.equal(saved?.history.length, 5);
-    console.log("PASS: Neon durable save cycles, reload, user isolation, response replay, stale revision, concurrent tabs, history");
+    if (!saved) throw new Error("Missing saved draft");
+    await assert.rejects(deleteServerDraft(a, address, lastId), (e: unknown) => (e as { status: number }).status === 409);
+    await deleteServerDraft(b, address, saved.requestId);
+    assert.equal((await readServerDraft(a, address))?.requestId, saved.requestId);
+    const otherDraft = { ...address, identity: "other-draft" };
+    await writeServerDraft(a, otherDraft, { version: 0, requestId: randomUUID(), values: { body: "other draft" } });
+    await deleteServerDraft(a, address, saved.requestId);
+    await deleteServerDraft(a, address, saved.requestId);
+    assert.equal(await readServerDraft(a, { scope: address.scope, identity: address.identity }), null);
+    assert.equal((await readServerDraft(a, otherDraft))?.values.body, "other draft");
+    console.log("PASS: save, resume, revision and account isolation, concurrency, history, and draft deletion");
   } finally {
     await db.delete(userTable).where(eq(userTable.id, a));
     await db.delete(userTable).where(eq(userTable.id, b));

@@ -15,7 +15,7 @@ export function unpackDraftValues(stored: Record<string, unknown>) {
   return { values, editor };
 }
 
-export type DraftListItem = { identity: string; path: string | null; title: string | null; parent: string | null; savedAt: string };
+export type DraftListItem = { identity: string; path: string | null; title: string | null; parent: string | null; savedAt: string; requestId: string };
 export function draftResumeUrl(collectionUrl: string, draft: DraftListItem) {
   const query = new URLSearchParams({ draft: draft.identity });
   if (!draft.path && draft.parent) query.set("parent", draft.parent);

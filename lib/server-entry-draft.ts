@@ -9,11 +9,20 @@ export type DraftAddress = { scope: string; identity: string; path?: string };
 export async function listServerDrafts(userId: string, scope: string, titleField = "title") {
   // The list needs summaries, not full bodies or checkpoint histories.
   return db.selectDistinctOn([sql`coalesce(${drafts.path}, ${drafts.identity})`], {
-    identity: drafts.identity, path: drafts.path, savedAt: drafts.savedAt,
+    identity: drafts.identity, path: drafts.path, savedAt: drafts.savedAt, requestId: drafts.requestId,
     title: sql<string | null>`${drafts.values} ->> ${titleField}`,
     parent: sql<string | null>`${drafts.values} -> '__pagesCmsDraftEditor' ->> 'parent'`,
   }).from(drafts).where(and(eq(drafts.userId, userId), eq(drafts.scope, scope)))
     .orderBy(sql`coalesce(${drafts.path}, ${drafts.identity})`, desc(drafts.savedAt));
+}
+
+export async function deleteServerDraft(userId: string, address: Pick<DraftAddress, "scope" | "identity">, requestId: string) {
+  const matchesDraft = and(eq(drafts.userId, userId), eq(drafts.scope, address.scope), eq(drafts.identity, address.identity));
+  // Match the revision in the list so a save from another tab cannot be erased.
+  const [deleted] = await db.delete(drafts).where(and(matchesDraft, eq(drafts.requestId, requestId))).returning({ id: drafts.id });
+  if (deleted) return;
+  const [current] = await db.select({ id: drafts.id }).from(drafts).where(matchesDraft).limit(1);
+  if (current) throw createHttpError("다른 탭에서 초안이 변경됐어요. 최신 내용을 확인해 주세요.", 409);
 }
 
 export async function readServerDraft(userId: string, address: DraftAddress) {
