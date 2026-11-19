@@ -1,6 +1,6 @@
 "use client";
 
-import { use } from "react";
+import { use, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { DocumentTitle, formatRepoBranchTitle } from "@/components/document-title";
 import { Entry } from "@/components/entry/entry";
@@ -23,6 +23,8 @@ export default function Page({
   if (!config) throw new Error("Configuration not found.");
   const searchParams = useSearchParams();
   const parent = searchParams.get("parent") || undefined;
+  const [newDraftIdentity] = useState(() => crypto.randomUUID());
+  const draftIdentity = searchParams.get("draft") || newDraftIdentity;
   const schemaName = decodeURIComponent(resolvedParams.name);
   const schema = getSchemaByName(config.object, schemaName);
   const displayName = schema?.label || schema?.name || schemaName;
@@ -32,7 +34,7 @@ export default function Page({
       <DocumentTitle
         title={formatRepoBranchTitle(`New entry | ${displayName}`, config.owner, config.repo, config.branch)}
       />
-      <Entry name={schemaName} title="New entry" parent={parent}/>
+      <Entry key={draftIdentity} name={schemaName} title="New entry" parent={parent} draftIdentity={draftIdentity} />
     </>
   );
 }

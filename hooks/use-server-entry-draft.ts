@@ -26,6 +26,7 @@ export function useServerEntryDraft(form: UseFormReturn<FieldValues>, address: S
     let firstChange = 0;
     let changed = false;
     let pending = 0;
+    let observedValues = draftFingerprint(form.getValues());
     let lastConfirmed: ServerDraft | null = null;
     const api = async (response: Response) => {
       const result = await response.json().catch(() => ({}));
@@ -93,7 +94,12 @@ export function useServerEntryDraft(form: UseFormReturn<FieldValues>, address: S
       clearTimeout(timer);
       timer = setTimeout(() => { void save().catch(() => {}); }, Math.min(1000, Math.max(0, 5000 - (Date.now() - firstChange))));
     };
-    const subscription = form.watch((_values, info) => { if (info.name) schedule(); });
+    const subscription = form.watch((_values, info) => {
+      const current = draftFingerprint(form.getValues());
+      if (current === observedValues) return;
+      observedValues = current;
+      if (info.name) schedule();
+    });
     const retry = () => { if (changed && !pending) void save().catch(() => {}); };
     const retryTimer = setInterval(retry, 15000);
     window.addEventListener("online", retry); window.addEventListener("focus", retry);

@@ -98,3 +98,37 @@ test("opening a saved draft does not replace text entered while the read was pen
     globalThis.fetch = originalFetch;
   }
 });
+
+test("opening an untouched editor or reopening a saved draft does not schedule a blank or duplicate save", async () => {
+  const originalFetch = globalThis.fetch;
+  let stored: ServerDraft | null = null;
+  let writes = 0;
+  globalThis.fetch = async (_input, init) => {
+    if (init?.method === "POST") writes++;
+    return Response.json({ data: stored });
+  };
+  let root: ReturnType<typeof createRoot> | undefined;
+  try {
+    root = await mount();
+    await act(async () => form.setValue("title", ""));
+    assert.equal(draft.status, "자동 임시저장 켜짐");
+    await act(async () => root!.unmount());
+
+    stored = {
+      identity: "new-draft", version: 1, history: [], savedAt: new Date().toISOString(),
+      values: { title: "saved title", body: "saved body" },
+    };
+    root = await mount();
+    assert.deepEqual(form.getValues(), stored.values);
+    await act(async () => {
+      form.setValue("title", "saved title");
+      form.setValue("body", "saved body");
+      window.dispatchEvent(new window.Event("focus"));
+    });
+    assert.match(draft.status, /서버 임시저장 완료/);
+    assert.equal(writes, 0);
+  } finally {
+    if (root) await act(async () => root!.unmount());
+    globalThis.fetch = originalFetch;
+  }
+});

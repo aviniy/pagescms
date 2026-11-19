@@ -96,6 +96,7 @@ type EntrySaveRequest = {
 export function Entry({
   name = "",
   path: initialPath,
+  draftIdentity: routeDraftIdentity,
   parent,
   title,
   headerMeta,
@@ -103,13 +104,14 @@ export function Entry({
 }: {
   name?: string;
   path?: string;
+  draftIdentity?: string;
   parent?: string;
   title?: string;
   headerMeta?: ReactNode;
   onSave?: (data: Record<string, unknown>) => void;
 }) {
   const [path, setPath] = useState<string | undefined>(initialPath);
-  const [draftIdentity] = useState(() => (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("draft") : null) ?? initialPath ?? crypto.randomUUID());
+  const [draftIdentity] = useState(() => routeDraftIdentity ?? initialPath ?? crypto.randomUUID());
   const [entry, setEntry] = useState<EntryData | null>();
   const [sha, setSha] = useState<string | undefined>();
   const [displayTitle, setDisplayTitle] = useState<string>(() => {
@@ -345,14 +347,23 @@ export function Entry({
     && filenameValue.trim().length > 0
     && filenameValue.trim() !== currentFilename;
 
-  const editUrlFor = (savedPath: string) => `/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/collection/${encodeURIComponent(name)}/edit/${encodeURIComponent(savedPath)}${!initialPath ? `?draft=${encodeURIComponent(draftIdentity)}` : ""}`;
+  const editUrlFor = useCallback((savedPath: string) => {
+    const query = new URLSearchParams();
+    if (draftIdentity !== initialPath || savedPath !== initialPath) query.set("draft", draftIdentity);
+    if (!initialPath && parent) query.set("parent", parent);
+    const url = `/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/collection/${encodeURIComponent(name)}/edit/${encodeURIComponent(savedPath)}`;
+    return query.size ? `${url}?${query}` : url;
+  }, [config.branch, config.owner, config.repo, draftIdentity, initialPath, name, parent]);
 
   useEffect(() => {
-    if (!initialPath && name) {
+    if (!initialPath && !path && name) {
       const url = new URL(window.location.href);
-      if (!url.searchParams.has("draft")) { url.searchParams.set("draft", draftIdentity); window.history.replaceState(null, "", url); }
+      if (!url.searchParams.get("draft")) {
+        url.searchParams.set("draft", draftIdentity);
+        window.history.replaceState(null, "", url);
+      }
     }
-  }, [draftIdentity, initialPath, name]);
+  }, [draftIdentity, initialPath, name, path]);
 
   const persistEntry = async (request: EntrySaveRequest, base: EntrySaveBase): Promise<EntrySaveResult> => {
     const { values, showFilenameField: showFilename, filenameFieldMode: filenameMode, filenameUnlocked } = request;
@@ -507,8 +518,8 @@ export function Entry({
     }
     setPath(newPath);
     saveQueue.rename(newPath);
-    window.history.replaceState(null, "", `/${config.owner}/${config.repo}/${encodeURIComponent(config.branch)}/collection/${encodeURIComponent(name)}/edit/${encodeURIComponent(newPath)}`);
-  }, [config.branch, config.owner, config.repo, entryApiUrl, mutate, name, saveQueue, schemaType]);
+    window.history.replaceState(null, "", editUrlFor(newPath));
+  }, [config.branch, config.owner, config.repo, editUrlFor, entryApiUrl, mutate, name, saveQueue, schemaType]);
 
   const breadcrumbNode = useMemo(() => {
     if (!schema) {
